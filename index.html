@@ -182,6 +182,15 @@ const diasParaVencer = (d) => {
     const venc = new Date(d + 'T00:00:00');
     return Math.round((venc - hoje) / 86400000);
 };
+const diasDesde = (isoDatetime) => {
+    if (!isoDatetime)
+        return null;
+    const then = new Date(isoDatetime);
+    if (isNaN(then))
+        return null;
+    const now = new Date();
+    return Math.floor((now - then) / 86400000);
+};
 const buildICSDataUri = (title, dateStr, notes) => {
     const dt = dateStr.replace(/-/g, '');
     const esc = (s) => String(s || '').replace(/\r?\n/g, ' ');
@@ -400,15 +409,16 @@ function SummaryCard({ label, value, tone }) {
         React.createElement("p", { className: "text-xs font-medium", style: { color: c.color, opacity: 0.85 } }, label),
         React.createElement("p", { className: "text-lg font-semibold mt-1", style: { color: c.color, fontFamily: 'var(--font-mono)' } }, value)));
 }
-function EntitySection({ collection, fields, title, addLabel, emptyLabel, getPrimary, getSecondary, getBadge, getExtraAction }) {
+function EntitySection({ collection, fields, title, addLabel, emptyLabel, getPrimary, getSecondary, getBadge, getExtraAction, onBeforeSave }) {
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState(null);
     const { items, loading, error, add, update, remove } = collection;
     const handleSave = async (data) => {
+        const finalData = onBeforeSave ? onBeforeSave(data, editing) : data;
         if (editing)
-            await update(editing.id, data);
+            await update(editing.id, finalData);
         else
-            await add(data);
+            await add(finalData);
         setModalOpen(false);
         setEditing(null);
     };
@@ -589,6 +599,7 @@ function ImportFinanceiroModal({ collection, onClose }) {
     const [error, setError] = useState(null);
     const [fileName, setFileName] = useState('');
     const [skippedCount, setSkippedCount] = useState(0);
+    const [dataInicio, setDataInicio] = useState('');
     const handleFile = (e) => {
         const file = e.target.files[0];
         if (!file)
@@ -624,7 +635,7 @@ function ImportFinanceiroModal({ collection, onClose }) {
                         obs,
                     };
                 });
-                const mapped = allMapped.filter((r) => r.descricao && r.vencimento);
+                const mapped = allMapped.filter((r) => r.descricao && r.vencimento && (!dataInicio || r.vencimento >= dataInicio));
                 setSkippedCount(allMapped.length - mapped.length);
                 if (mapped.length === 0) {
                     setError('Não encontrei linhas com as colunas esperadas (VENC., TIPO, NOME INSTITUIÇÃO, VALOR). Confira o arquivo.');
@@ -663,6 +674,10 @@ function ImportFinanceiroModal({ collection, onClose }) {
                     React.createElement(X, { size: 20, color: "var(--navy)" }))),
             status === 'idle' && (React.createElement("div", null,
                 React.createElement("p", { className: "text-xs mb-3", style: { color: 'var(--text-muted)' } }, "Selecione o arquivo .xlsx com suas contas. Procuro pelas colunas VENC., TIPO, NOME INSTITUI\u00C7\u00C3O, VALOR e DTA PGTO."),
+                React.createElement("div", { className: "mb-3" },
+                    React.createElement("label", { className: "block text-xs font-medium mb-1", style: { color: 'var(--text-muted)' } }, "Importar vencimentos a partir de (opcional)"),
+                    React.createElement("input", { type: "date", value: dataInicio, onChange: (e) => setDataInicio(e.target.value), className: "w-full rounded-lg px-3 py-2 text-sm border", style: { borderColor: 'var(--line)', background: 'white', color: 'var(--text)' } }),
+                    React.createElement("p", { className: "text-xs mt-1", style: { color: 'var(--text-muted)' } }, "Deixe em branco para importar tudo.")),
                 React.createElement("input", { type: "file", id: "import-financeiro-file", accept: ".xlsx,.xls,.csv", onChange: handleFile, style: { display: 'none' } }),
                 React.createElement("label", { htmlFor: "import-financeiro-file", className: "flex items-center justify-center w-full rounded-lg py-3 font-medium text-sm", style: { background: 'var(--navy)', color: 'var(--teal-soft)', cursor: 'pointer' } }, "Escolher arquivo"))),
             status === 'parsing' && React.createElement("p", { className: "text-sm", style: { color: 'var(--text-muted)' } },
@@ -677,9 +692,13 @@ function ImportFinanceiroModal({ collection, onClose }) {
                     "Encontrei ",
                     React.createElement("strong", null, preview.length),
                     " conta(s) prontas para importar."),
+                dataInicio && (React.createElement("p", { className: "text-xs mb-1", style: { color: 'var(--text-muted)' } },
+                    "Filtrando vencimentos a partir de ",
+                    formatDate(dataInicio),
+                    ".")),
                 skippedCount > 0 && (React.createElement("p", { className: "text-xs mb-3", style: { color: '#9C6B1A' } },
                     skippedCount,
-                    " linha(s) ignorada(s) por falta de nome ou data de vencimento v\u00E1lida.")),
+                    " linha(s) ignorada(s) por falta de nome, data inv\u00E1lida ou fora do per\u00EDodo selecionado.")),
                 React.createElement("div", { className: "space-y-1 mb-4", style: { maxHeight: '240px', overflowY: 'auto' } },
                     preview.slice(0, 8).map((r, i) => (React.createElement("div", { key: i, className: "text-xs rounded-lg px-3 py-2", style: { background: 'var(--paper-alt)', color: 'var(--text-muted)' } },
                         r.tipo,
@@ -1102,10 +1121,30 @@ function DocumentosTab({ collection }) {
             return { text: `Vence em ${d}d`, bg: '#FBF0DC', color: '#9C6B1A' };
         return { text: 'Válido', bg: 'var(--green-soft)', color: 'var(--green)' };
     };
+    const linkStatusText = (item) => {
+        if (!item.link)
+            return null;
+        const dias = diasDesde(item.linkAtualizadoEm);
+        if (dias === null)
+            return 'Link cadastrado antes deste lembrete — abra e confirme';
+        if (dias === 0)
+            return 'Link conferido hoje';
+        if (dias === 1)
+            return 'Link conferido há 1 dia';
+        return `Link conferido há ${dias} dias`;
+    };
+    const handleBeforeSave = (data, previous) => {
+        const linkAnterior = previous ? previous.link : '';
+        if (data.link && data.link !== linkAnterior) {
+            return { ...data, linkAtualizadoEm: new Date().toISOString() };
+        }
+        return data;
+    };
     return (React.createElement(TabWatermark, null,
-        React.createElement(EntitySection, { collection: collection, fields: DOCUMENTOS_FIELDS, title: "Documentos", addLabel: "Novo documento", emptyLabel: "Nenhum documento cadastrado. Adicione certid\u00F5es, licen\u00E7as, cadastros e outros documentos da empresa.", getPrimary: (i) => i.nome, getSecondary: (i) => [
+        React.createElement(EntitySection, { collection: collection, fields: DOCUMENTOS_FIELDS, title: "Documentos", addLabel: "Novo documento", emptyLabel: "Nenhum documento cadastrado. Adicione certid\u00F5es, licen\u00E7as, cadastros e outros documentos da empresa.", onBeforeSave: handleBeforeSave, getPrimary: (i) => i.nome, getSecondary: (i) => [
                 i.tipo || null,
                 i.vencimento ? `Vencimento: ${formatDate(i.vencimento)}` : 'Sem vencimento',
+                linkStatusText(i),
                 i.notas || null,
             ], getBadge: badgeFor, getExtraAction: (i) => (React.createElement(React.Fragment, null,
                 i.vencimento && (React.createElement("a", { href: buildICSDataUri(`Vencimento: ${i.nome}`, i.vencimento, i.notas), download: `lembrete-${i.id}.ics`, className: "p-1.5 rounded-lg", style: { background: 'var(--paper-alt)' }, title: "Adicionar ao Calend\u00E1rio" },
