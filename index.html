@@ -807,6 +807,24 @@ function FinanceiroTab({ collection }) {
         setModalOpen(false);
         setEditing(null);
     };
+    const handleExport = () => {
+        const buildRows = (list) => [...list]
+            .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
+            .map((i) => ({
+                'Vencimento': formatDate(i.vencimento),
+                'Descrição': i.descricao,
+                'Valor (R$)': Number(i.valor) || 0,
+                'Status': i.status,
+                'Observação': i.obs || '',
+            }));
+        const wb = XLSX.utils.book_new();
+        const wsPagar = XLSX.utils.json_to_sheet(buildRows(pagar));
+        const wsReceber = XLSX.utils.json_to_sheet(buildRows(receber));
+        XLSX.utils.book_append_sheet(wb, wsPagar, 'A Pagar');
+        XLSX.utils.book_append_sheet(wb, wsReceber, 'A Receber');
+        const hoje = new Date().toISOString().slice(0, 10);
+        XLSX.writeFile(wb, `distrisol-contas-${hoje}.xlsx`);
+    };
     const badgeFor = (item) => {
         if (item.status === 'Concluído') {
             return { text: item.tipo === 'Pagar' ? 'Pago' : 'Recebido', bg: 'var(--green-soft)', color: 'var(--green)' };
@@ -830,6 +848,7 @@ function FinanceiroTab({ collection }) {
                 React.createElement("h2", { className: "font-semibold text-base", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, "Financeiro"),
                 React.createElement("div", { className: "flex gap-2" },
                     React.createElement("button", { onClick: () => setImportModalOpen(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Importar planilha"),
+                    React.createElement("button", { onClick: handleExport, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar Excel"),
                     React.createElement("button", { onClick: () => { setEditing(null); setModalOpen(true); }, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } },
                         React.createElement(Plus, { size: 14 }),
                         " Nova conta"))),
