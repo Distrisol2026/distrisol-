@@ -558,14 +558,23 @@ function excelDateToISO(val) {
         // Brazilian format: DD/MM/YYYY or DD-MM-YYYY (most common in exported spreadsheets)
         let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
         if (m) {
-            const day = m[1].padStart(2, '0');
-            const month = m[2].padStart(2, '0');
-            return `${m[3]}-${month}-${day}`;
+            const day = Number(m[1]);
+            const month = Number(m[2]);
+            const year = Number(m[3]);
+            // Invalid calendar dates (e.g. 29/02 outside a leap year) roll
+            // forward to the next valid day instead of being silently
+            // reinterpreted by the browser later on.
+            const date = new Date(year, month - 1, day);
+            return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
         }
         // Already ISO: YYYY-MM-DD
         m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
         if (m) {
-            return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+            const year = Number(m[1]);
+            const month = Number(m[2]);
+            const day = Number(m[3]);
+            const date = new Date(year, month - 1, day);
+            return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
         }
         // last resort: generic parse (may be unreliable for ambiguous formats)
         const d = new Date(s);
