@@ -364,7 +364,6 @@ const DOCUMENTOS_FIELDS = [
 const TEMPLATE_FIELDS = [
     { key: 'nome', label: 'Nome (ex: Aluguel, Salários, Energia)', type: 'text', required: true },
     { key: 'tipo', label: 'Tipo', type: 'select', options: ['Pagar', 'Receber'], required: true },
-    { key: 'categoria', label: 'Categoria', type: 'select', options: ['Fixa', 'Variável'], default: 'Fixa' },
     { key: 'valorPadrao', label: 'Valor padrão mensal (R$)', type: 'number', step: '0.01', default: 0 },
     { key: 'diaVencimento', label: 'Dia do vencimento (1-31)', type: 'number', default: 5 },
 ];
@@ -1095,40 +1094,56 @@ function FinanceiroTable({ items, update, remove }) {
                     React.createElement("button", { onClick: () => remove(item.id), style: { padding: '4px', display: 'flex' } },
                         React.createElement(Trash2, { size: 13, color: "var(--red)" }))))))))));
 }
-function FinanceiroTemplatesSection({ collection }) {
+function FinanceiroTemplatesSection({ templatesCollection, financeiroCollection }) {
     const [subCategoria, setSubCategoria] = useState('Fixa');
-    const filtrados = collection.items.filter((i) => i.categoria === subCategoria);
-    const filteredCollection = { ...collection, items: filtrados };
-    const fieldsComDefault = TEMPLATE_FIELDS.map((f) => f.key === 'categoria' ? { ...f, default: subCategoria } : f);
     const handleExportTemplates = () => {
-        const buildRows = (categoria) => collection.items
-            .filter((i) => i.categoria === categoria)
+        const rowsFixas = templatesCollection.items.map((i) => ({
+            'Nome': i.nome,
+            'Tipo': i.tipo,
+            'Valor padrão (R$)': Number(i.valorPadrao) || 0,
+            'Dia do vencimento': i.diaVencimento,
+        }));
+        const rowsVariaveis = financeiroCollection.items
+            .filter((i) => i.categoria === 'Variável')
             .map((i) => ({
-                'Nome': i.nome,
-                'Tipo': i.tipo,
-                'Valor padrão (R$)': Number(i.valorPadrao) || 0,
-                'Dia do vencimento': i.diaVencimento,
-            }));
-        const opts = { widths: { 'Nome': 28, 'Tipo': 12, 'Valor padrão (R$)': 16, 'Dia do vencimento': 16 }, currencyCols: ['Valor padrão (R$)'] };
+            'Descrição': i.descricao,
+            'Tipo': i.tipo,
+            'Valor (R$)': Number(i.valor) || 0,
+            'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+            'Status': i.status,
+        }));
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRows('Fixa'), opts), 'Fixas');
-        XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRows('Variável'), opts), 'Variáveis');
+        XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsFixas, { widths: { 'Nome': 28, 'Tipo': 12, 'Valor padrão (R$)': 16, 'Dia do vencimento': 16 }, currencyCols: ['Valor padrão (R$)'] }), 'Fixas');
+        XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsVariaveis, { widths: { 'Descrição': 28, 'Tipo': 12, 'Valor (R$)': 14, 'Vencimento': 14, 'Status': 12 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] }), 'Variáveis');
         XLSX.writeFile(wb, 'distrisol-contas-fixas-variaveis.xlsx');
+    };
+    const variaveisFiltradas = financeiroCollection.items.filter((i) => i.categoria === 'Variável');
+    const variaveisCollection = {
+        ...financeiroCollection,
+        items: variaveisFiltradas,
+        add: (item) => financeiroCollection.add({ ...item, categoria: 'Variável' }),
     };
     return (React.createElement("div", null,
         React.createElement("div", { className: "flex items-center justify-between mb-3 gap-2" },
-            React.createElement("p", { className: "text-xs", style: { color: 'var(--text-muted)' } }, "Cadastre aqui contas que se repetem todo m\u00EAs (aluguel, sal\u00E1rios, energia). Elas geram automaticamente uma conta pendente em \"Contas a pagar/receber\" \u2014 pras vari\u00E1veis, o valor vem em branco pra voc\u00EA ajustar quando o m\u00EAs chegar."),
+            React.createElement("p", { className: "text-xs", style: { color: 'var(--text-muted)' } }, subCategoria === 'Fixa'
+                ? "Cadastre aqui contas que se repetem todo mês (aluguel, salários, energia). Elas geram automaticamente uma conta pendente em \"Contas a pagar/receber\", com o dia certo já calculado."
+                : "Lance aqui títulos avulsos ou despesas extras, com a data real de cada um. Não repete sozinho — é só uma forma de separar dos gastos fixos, entra direto em \"Contas a pagar/receber\"."),
             React.createElement("button", { onClick: handleExportTemplates, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full shrink-0", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar")),
         React.createElement("div", { className: "flex gap-2 mb-4" },
             React.createElement("button", { onClick: () => setSubCategoria('Fixa'), className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: subCategoria === 'Fixa' ? 'var(--navy)' : 'var(--paper-alt)', color: subCategoria === 'Fixa' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Fixas"),
             React.createElement("button", { onClick: () => setSubCategoria('Variável'), className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: subCategoria === 'Variável' ? 'var(--navy)' : 'var(--paper-alt)', color: subCategoria === 'Variável' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Vari\u00E1veis")),
-        React.createElement(EntitySection, { collection: filteredCollection, fields: fieldsComDefault, title: "", addLabel: `Nova conta ${subCategoria.toLowerCase()}`, emptyLabel: `Nenhuma conta ${subCategoria.toLowerCase()} cadastrada ainda.`, getPrimary: (i) => i.nome, getSecondary: (i) => [
-                `${i.tipo} · dia ${i.diaVencimento} de cada mês`,
-                i.valorPadrao ? `Valor padrão: ${formatBRL(i.valorPadrao)}` : 'Valor varia — ajuste todo mês',
-            ], getBadge: (i) => i.categoria === 'Fixa'
-                ? { text: 'Fixa', bg: 'var(--green-soft)', color: 'var(--green)' }
-                : { text: 'Variável', bg: '#FBF0DC', color: '#9C6B1A' }, getExtraAction: (i) => (i.diaVencimento ? React.createElement("a", { href: buildRecurringICSDataUri(`${i.tipo}: ${i.nome}`, i.diaVencimento, i.categoria), download: `lembrete-mensal-${i.id}.ics`, className: "p-1.5 rounded-lg", style: { background: 'var(--paper-alt)' }, title: "Lembrete mensal no Calend\u00E1rio" },
-                React.createElement(CalendarPlus, { size: 14, color: "var(--navy)" })) : null) })));
+        subCategoria === 'Fixa'
+            ? React.createElement(EntitySection, { collection: templatesCollection, fields: TEMPLATE_FIELDS, title: "", addLabel: "Nova conta fixa", emptyLabel: "Nenhuma conta fixa cadastrada ainda.", getPrimary: (i) => i.nome, getSecondary: (i) => [
+                    `${i.tipo} · dia ${i.diaVencimento} de cada mês`,
+                    `Valor padrão: ${formatBRL(i.valorPadrao)}`,
+                ], getBadge: () => ({ text: 'Fixa', bg: 'var(--green-soft)', color: 'var(--green)' }), getExtraAction: (i) => (i.diaVencimento ? React.createElement("a", { href: buildRecurringICSDataUri(`${i.tipo}: ${i.nome}`, i.diaVencimento, 'Conta fixa'), download: `lembrete-mensal-${i.id}.ics`, className: "p-1.5 rounded-lg", style: { background: 'var(--paper-alt)' }, title: "Lembrete mensal no Calend\u00E1rio" },
+                React.createElement(CalendarPlus, { size: 14, color: "var(--navy)" })) : null) })
+            : React.createElement(EntitySection, { collection: variaveisCollection, fields: FINANCEIRO_FIELDS, title: "", addLabel: "Nova vari\u00E1vel", emptyLabel: "Nenhum t\u00EDtulo avulso lan\u00E7ado ainda.", getPrimary: (i) => i.descricao, getSecondary: (i) => [
+                    `${i.tipo} · vencimento ${formatDate(i.vencimento)}`,
+                    formatBRL(i.valor),
+                ], getBadge: (i) => i.status === 'Concluído'
+                    ? { text: i.tipo === 'Pagar' ? 'Pago' : 'Recebido', bg: 'var(--green-soft)', color: 'var(--green)' }
+                    : { text: 'Variável', bg: '#FBF0DC', color: '#9C6B1A' } })));
 }
 function FinanceiroTab({ collection }) {
     const { items, loading, error, add, update, remove } = collection;
@@ -1152,10 +1167,10 @@ function FinanceiroTab({ collection }) {
                 add({
                     tipo: t.tipo,
                     descricao: t.nome,
-                    valor: t.categoria === 'Variável' ? 0 : (Number(t.valorPadrao) || 0),
+                    valor: Number(t.valorPadrao) || 0,
                     vencimento: vencimentoDoMes(t.diaVencimento, ano, mes),
                     status: 'Pendente',
-                    obs: t.categoria,
+                    categoria: 'Fixa',
                     origemTemplateId: t.id,
                     competencia,
                 });
@@ -1256,7 +1271,7 @@ function FinanceiroTab({ collection }) {
                 React.createElement("button", { onClick: () => setViewMode('tabela'), className: "text-xs font-medium px-3 py-1.5 rounded-full shrink-0", style: { background: viewMode === 'tabela' ? 'var(--navy)' : 'var(--paper-alt)', color: viewMode === 'tabela' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Tabela (editar direto)"),
                 React.createElement("button", { onClick: () => setViewMode('fixas'), className: "text-xs font-medium px-3 py-1.5 rounded-full shrink-0", style: { background: viewMode === 'fixas' ? 'var(--navy)' : 'var(--paper-alt)', color: viewMode === 'fixas' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Fixas/Vari\u00E1veis")),
             viewMode === 'fixas' ? (React.createElement("div", { className: "mt-3" },
-                React.createElement(FinanceiroTemplatesSection, { collection: templates }))) : loading ? (React.createElement("p", { className: "text-sm mt-4", style: { color: 'var(--text-muted)' } }, "Carregando...")) : viewMode === 'tabela' ? (React.createElement("div", { className: "mt-3" },
+                React.createElement(FinanceiroTemplatesSection, { templatesCollection: templates, financeiroCollection: collection }))) : loading ? (React.createElement("p", { className: "text-sm mt-4", style: { color: 'var(--text-muted)' } }, "Carregando...")) : viewMode === 'tabela' ? (React.createElement("div", { className: "mt-3" },
                 React.createElement(FinanceiroTable, { items: items, update: update, remove: remove }))) : (React.createElement(React.Fragment, null,
                 renderList(pagar, 'Contas a pagar · Fornecedores'),
                 renderList(receber, 'Contas a receber · Clientes'))),
