@@ -409,7 +409,7 @@ function SummaryCard({ label, value, tone }) {
         React.createElement("p", { className: "text-xs font-medium", style: { color: c.color, opacity: 0.85 } }, label),
         React.createElement("p", { className: "text-lg font-semibold mt-1", style: { color: c.color, fontFamily: 'var(--font-mono)' } }, value)));
 }
-function EntitySection({ collection, fields, title, addLabel, emptyLabel, getPrimary, getSecondary, getBadge, getExtraAction, onBeforeSave }) {
+function EntitySection({ collection, fields, title, addLabel, emptyLabel, getPrimary, getSecondary, getBadge, getExtraAction, onBeforeSave, headerExtra }) {
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState(null);
     const { items, loading, error, add, update, remove } = collection;
@@ -425,10 +425,12 @@ function EntitySection({ collection, fields, title, addLabel, emptyLabel, getPri
     return (React.createElement("div", null,
         React.createElement("div", { className: "flex items-center justify-between mb-3" },
             title ? (React.createElement("h2", { className: "font-semibold text-base", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, title)) : React.createElement("div", null),
-            React.createElement("button", { onClick: () => { setEditing(null); setModalOpen(true); }, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } },
-                React.createElement(Plus, { size: 14 }),
-                " ",
-                addLabel)),
+            React.createElement("div", { className: "flex gap-2" },
+                headerExtra || null,
+                React.createElement("button", { onClick: () => { setEditing(null); setModalOpen(true); }, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } },
+                    React.createElement(Plus, { size: 14 }),
+                    " ",
+                    addLabel))),
         error && React.createElement("p", { className: "text-xs mb-2", style: { color: 'var(--red)' } }, error),
         loading ? (React.createElement("p", { className: "text-sm", style: { color: 'var(--text-muted)' } }, "Carregando...")) : items.length === 0 ? (React.createElement("div", { className: "rounded-xl p-6 text-center text-sm", style: { background: 'var(--paper-alt)', color: 'var(--text-muted)' } }, emptyLabel)) : (React.createElement("div", { className: "space-y-2" }, items.map((item) => (React.createElement(RecordCard, { key: item.id, primaryLabel: getPrimary(item), secondaryLines: getSecondary(item), badge: getBadge ? getBadge(item) : null, onEdit: () => { setEditing(item); setModalOpen(true); }, onDelete: () => remove(item.id), extraAction: getExtraAction ? getExtraAction(item) : null }))))),
         modalOpen && (React.createElement(RecordModal, { title: editing ? 'Editar' : addLabel, fields: fields, initial: editing, onClose: () => { setModalOpen(false); setEditing(null); }, onSave: handleSave }))));
@@ -508,9 +510,129 @@ function MovimentoModal({ produtos, onClose, onSave }) {
                     } },
                     React.createElement("button", { type: "submit", disabled: saving, className: "w-full rounded-lg py-2.5 font-medium text-sm", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } }, saving ? 'Salvando...' : 'Registrar movimentação')))))));
 }
+function ImportEstoqueModal({ collection, onClose }) {
+    const [status, setStatus] = useState('idle'); // idle | parsing | preview | importing | done | error
+    const [preview, setPreview] = useState([]);
+    const [error, setError] = useState(null);
+    const [fileName, setFileName] = useState('');
+    const [skippedCount, setSkippedCount] = useState(0);
+    const handleFile = (e) => {
+        const file = e.target.files[0];
+        if (!file)
+            return;
+        setFileName(file.name);
+        setStatus('parsing');
+        setError(null);
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            try {
+                const data = new Uint8Array(evt.target.result);
+                const wb = XLSX.read(data, { type: 'array', cellDates: true });
+                const sheetName = wb.SheetNames[0];
+                const ws = wb.Sheets[sheetName];
+                const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+                const allMapped = rows.map((r) => {
+                    const nome = r['Produto'] ?? r['PRODUTO'] ?? r['Nome'] ?? r['NOME'] ?? r['Descrição'] ?? r['Descricao'] ?? r['Item'] ?? '';
+                    const categoria = r['Categoria'] ?? r['CATEGORIA'] ?? '';
+                    const quantidade = Number(r['Quantidade'] ?? r['QTD'] ?? r['Qtd'] ?? r['Estoque'] ?? r['QUANTIDADE'] ?? 0) || 0;
+                    const estoqueMinimo = Number(r['Estoque mínimo'] ?? r['Estoque Minimo'] ?? r['Est. Mínimo'] ?? r['MINIMO'] ?? r['Mínimo'] ?? 0) || 0;
+                    const unidade = r['Unidade'] ?? r['UN'] ?? r['Un'] ?? 'un';
+                    const precoUnit = Number(r['Preço unitário'] ?? r['Preco Unitario'] ?? r['Preço'] ?? r['VALOR UNIT'] ?? r['Valor Unitário'] ?? r['Valor Unit.'] ?? 0) || 0;
+                    return {
+                        nome: String(nome).trim(),
+                        categoria: String(categoria).trim(),
+                        quantidade,
+                        estoqueMinimo,
+                        unidade: String(unidade).trim() || 'un',
+                        precoUnit,
+                    };
+                });
+                const mapped = allMapped.filter((r) => r.nome);
+                setSkippedCount(allMapped.length - mapped.length);
+                if (mapped.length === 0) {
+                    setError('Não encontrei linhas com um nome de produto. Confira as colunas do arquivo (ex: Produto, Categoria, Quantidade, Estoque mínimo, Unidade, Preço unitário).');
+                    setStatus('error');
+                }
+                else {
+                    setPreview(mapped);
+                    setStatus('preview');
+                }
+            }
+            catch (err) {
+                setError('Não consegui ler esse arquivo. Confira se é um .xlsx válido.');
+                setStatus('error');
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    };
+    const handleImport = async () => {
+        setStatus('importing');
+        for (const record of preview) {
+            await collection.add(record);
+        }
+        setStatus('done');
+    };
+    return (React.createElement("div", { className: "fixed inset-0 z-50 flex items-center justify-center", style: { background: 'rgba(20,33,61,0.45)', zIndex: 100, padding: '16px' }, onClick: onClose },
+        React.createElement("div", { className: "w-full md:max-w-md rounded-2xl overflow-y-auto", style: {
+                background: 'var(--paper)', maxHeight: '85vh',
+                padding: '20px',
+                paddingLeft: 'max(20px, env(safe-area-inset-left))',
+                paddingRight: 'max(20px, env(safe-area-inset-right))',
+                paddingBottom: 'max(20px, env(safe-area-inset-bottom))',
+            }, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { className: "flex items-center justify-between mb-4" },
+                React.createElement("h3", { className: "font-semibold text-lg", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, "Importar planilha de estoque"),
+                React.createElement("button", { onClick: onClose, className: "p-1 rounded-full" },
+                    React.createElement(X, { size: 20, color: "var(--navy)" }))),
+            status === 'idle' && (React.createElement("div", null,
+                React.createElement("p", { className: "text-xs mb-3", style: { color: 'var(--text-muted)' } }, "Selecione o arquivo .xlsx com seus produtos. Procuro pelas colunas Produto, Categoria, Quantidade, Estoque m\u00EDnimo, Unidade e Pre\u00E7o unit\u00E1rio."),
+                React.createElement("input", { type: "file", id: "import-estoque-file", accept: ".xlsx,.xls,.csv", onChange: handleFile, style: { display: 'none' } }),
+                React.createElement("label", { htmlFor: "import-estoque-file", className: "flex items-center justify-center w-full rounded-lg py-3 font-medium text-sm", style: { background: 'var(--navy)', color: 'var(--teal-soft)', cursor: 'pointer' } }, "Escolher arquivo"))),
+            status === 'parsing' && React.createElement("p", { className: "text-sm", style: { color: 'var(--text-muted)' } },
+                "Lendo ",
+                fileName,
+                "..."),
+            status === 'error' && (React.createElement("div", null,
+                React.createElement("p", { className: "text-sm mb-3", style: { color: 'var(--red)' } }, error),
+                React.createElement("button", { onClick: () => setStatus('idle'), className: "text-xs font-medium", style: { color: 'var(--navy)' } }, "Tentar outro arquivo"))),
+            status === 'preview' && (React.createElement("div", null,
+                React.createElement("p", { className: "text-sm mb-1", style: { color: 'var(--navy)' } },
+                    "Encontrei ",
+                    React.createElement("strong", null, preview.length),
+                    " produto(s) prontos para importar."),
+                skippedCount > 0 && (React.createElement("p", { className: "text-xs mb-3", style: { color: '#9C6B1A' } },
+                    skippedCount,
+                    " linha(s) ignorada(s) por falta de nome do produto.")),
+                React.createElement("div", { className: "space-y-1 mb-4", style: { maxHeight: '240px', overflowY: 'auto' } },
+                    preview.slice(0, 8).map((r, i) => (React.createElement("div", { key: i, className: "text-xs rounded-lg px-3 py-2", style: { background: 'var(--paper-alt)', color: 'var(--text-muted)' } },
+                        r.nome,
+                        " \u00B7 ",
+                        r.categoria || 'sem categoria',
+                        " \u00B7 ",
+                        r.quantidade,
+                        " ",
+                        r.unidade,
+                        r.precoUnit ? ` · ${formatBRL(r.precoUnit)}` : ''))),
+                    preview.length > 8 && (React.createElement("p", { className: "text-xs text-center", style: { color: 'var(--text-muted)' } },
+                        "+ ",
+                        preview.length - 8,
+                        " outros..."))),
+                React.createElement("button", { onClick: handleImport, className: "w-full rounded-lg py-2.5 font-medium text-sm", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } },
+                    "Importar ",
+                    preview.length,
+                    " produto(s)"))),
+            status === 'importing' && React.createElement("p", { className: "text-sm", style: { color: 'var(--text-muted)' } }, "Importando..."),
+            status === 'done' && (React.createElement("div", { className: "text-center py-4" },
+                React.createElement("p", { className: "text-sm font-medium mb-3", style: { color: 'var(--green)' } },
+                    "Pronto! ",
+                    preview.length,
+                    " produto(s) importado(s)."),
+                React.createElement("button", { onClick: onClose, className: "rounded-lg px-5 py-2 text-sm font-medium", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } }, "Fechar"))))));
+}
 function EstoqueTab({ collection }) {
     const movimentos = useCollection('distrisol:estoque-movimentos');
     const [movModalOpen, setMovModalOpen] = useState(false);
+    const [importModalOpen, setImportModalOpen] = useState(false);
     const handleMovimento = async (mov) => {
         const produto = collection.items.find((p) => p.id === mov.produtoId);
         if (!produto)
@@ -522,7 +644,7 @@ function EstoqueTab({ collection }) {
         setMovModalOpen(false);
     };
     return (React.createElement(TabWatermark, null,
-        React.createElement(EntitySection, { collection: collection, fields: ESTOQUE_FIELDS, title: "Estoque", addLabel: "Novo item", emptyLabel: "Nenhum item cadastrado. Adicione o primeiro produto do estoque.", getPrimary: (i) => i.nome, getSecondary: (i) => [
+        React.createElement(EntitySection, { collection: collection, fields: ESTOQUE_FIELDS, title: "Estoque", addLabel: "Novo item", emptyLabel: "Nenhum item cadastrado. Adicione o primeiro produto do estoque.", headerExtra: React.createElement("button", { onClick: () => setImportModalOpen(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Importar planilha"), getPrimary: (i) => i.nome, getSecondary: (i) => [
                 `${i.categoria || 'Sem categoria'} · ${i.quantidade} ${i.unidade || 'un'}`,
                 i.precoUnit ? `Preço unit.: ${formatBRL(i.precoUnit)}` : null,
             ], getBadge: (i) => Number(i.quantidade) <= Number(i.estoqueMinimo || 0)
@@ -545,7 +667,8 @@ function EstoqueTab({ collection }) {
                     m.quantidade),
                 React.createElement("button", { onClick: () => movimentos.remove(m.id), className: "p-1.5 rounded-lg shrink-0", style: { background: 'var(--red-soft)' } },
                     React.createElement(Trash2, { size: 13, color: "var(--red)" })))))))),
-        movModalOpen && (React.createElement(MovimentoModal, { produtos: collection.items, onClose: () => setMovModalOpen(false), onSave: handleMovimento }))));
+        movModalOpen && (React.createElement(MovimentoModal, { produtos: collection.items, onClose: () => setMovModalOpen(false), onSave: handleMovimento })),
+        importModalOpen && (React.createElement(ImportEstoqueModal, { collection: collection, onClose: () => setImportModalOpen(false) }))));
 }
 function vencimentoDoMes(diaVencimento, ano, mes) {
     const lastDay = new Date(ano, mes, 0).getDate();
