@@ -429,7 +429,7 @@ function EntitySection({ collection, fields, title, addLabel, emptyLabel, getPri
     return (React.createElement("div", null,
         React.createElement("div", { className: "flex items-center justify-between mb-3" },
             title ? (React.createElement("h2", { className: "font-semibold text-base", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, title)) : React.createElement("div", null),
-            React.createElement("div", { className: "flex gap-2" },
+            React.createElement("div", { className: "flex flex-wrap gap-2 justify-end" },
                 headerExtra || null,
                 React.createElement("button", { onClick: () => { setEditing(null); setModalOpen(true); }, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } },
                     React.createElement(Plus, { size: 14 }),
@@ -648,6 +648,37 @@ function EstoqueTab({ collection }) {
     const lotes = useCollection('distrisol:estoque-lotes');
     const [movModalOpen, setMovModalOpen] = useState(false);
     const [importModalOpen, setImportModalOpen] = useState(false);
+    const handleExport = () => {
+        const rows = [...collection.items]
+            .sort((a, b) => a.nome.localeCompare(b.nome))
+            .map((i) => ({
+                'Produto': i.nome,
+                'Categoria': i.categoria || '',
+                'Quantidade': Number(i.quantidade) || 0,
+                'Unidade': i.unidade || 'un',
+                'Estoque mínimo': Number(i.estoqueMinimo) || 0,
+                'Preço unitário (R$)': Number(i.precoUnit) || 0,
+            }));
+        const loteRows = [...lotes.items]
+            .filter((l) => Number(l.quantidade) > 0)
+            .sort((a, b) => {
+            if (!a.validade)
+                return 1;
+            if (!b.validade)
+                return -1;
+            return new Date(a.validade) - new Date(b.validade);
+        })
+            .map((l) => ({
+            'Produto': l.produtoNome,
+            'Lote': l.lote || '',
+            'Validade': l.validade ? formatDate(l.validade) : '',
+            'Quantidade': l.quantidade,
+        }));
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Estoque');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(loteRows), 'Lotes');
+        XLSX.writeFile(wb, 'distrisol-estoque.xlsx');
+    };
     const handleMovimento = async (mov) => {
         const produto = collection.items.find((p) => p.id === mov.produtoId);
         if (!produto)
@@ -716,7 +747,9 @@ function EstoqueTab({ collection }) {
         return `Validade mais próxima: ${formatDate(proximo.validade)} (${rotulo})${extra}`;
     };
     return (React.createElement(TabWatermark, null,
-        React.createElement(EntitySection, { collection: collection, fields: ESTOQUE_FIELDS, title: "Estoque", addLabel: "Novo item", emptyLabel: "Nenhum item cadastrado. Adicione o primeiro produto do estoque.", headerExtra: React.createElement("button", { onClick: () => setImportModalOpen(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Importar planilha"), getPrimary: (i) => i.nome, getSecondary: (i) => [
+        React.createElement(EntitySection, { collection: collection, fields: ESTOQUE_FIELDS, title: "Estoque", addLabel: "Novo item", emptyLabel: "Nenhum item cadastrado. Adicione o primeiro produto do estoque.", headerExtra: React.createElement(React.Fragment, null,
+                React.createElement("button", { onClick: () => setImportModalOpen(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Importar planilha"),
+                React.createElement("button", { onClick: handleExport, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar Excel")), getPrimary: (i) => i.nome, getSecondary: (i) => [
                 `${i.categoria || 'Sem categoria'} · ${i.quantidade} ${i.unidade || 'un'}`,
                 i.precoUnit ? `Preço unit.: ${formatBRL(i.precoUnit)}` : null,
                 validadeInfo(i.id),
@@ -1061,8 +1094,7 @@ function FinanceiroTab({ collection }) {
         const wsReceber = XLSX.utils.json_to_sheet(buildRows(receber));
         XLSX.utils.book_append_sheet(wb, wsPagar, 'A Pagar');
         XLSX.utils.book_append_sheet(wb, wsReceber, 'A Receber');
-        const hoje = new Date().toISOString().slice(0, 10);
-        XLSX.writeFile(wb, `distrisol-contas-${hoje}.xlsx`);
+        XLSX.writeFile(wb, 'distrisol-contas.xlsx');
     };
     const badgeFor = (item) => {
         if (item.status === 'Concluído') {
@@ -1170,9 +1202,26 @@ const VENDAS_MODALIDADES = [
 function VendasTab({ collections }) {
     const [sub, setSub] = useState('licitacoes');
     const modConfig = VENDAS_MODALIDADES.find((m) => m.key === sub);
+    const handleExport = () => {
+        const wb = XLSX.utils.book_new();
+        VENDAS_MODALIDADES.forEach((m) => {
+            const rows = collections[m.key].items.map((i) => {
+                const row = {};
+                m.fields.forEach((f) => {
+                    const v = i[f.key];
+                    row[f.label] = f.type === 'date' ? formatDate(v) : f.type === 'number' ? (Number(v) || 0) : (v ?? '');
+                });
+                return row;
+            });
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), m.label.slice(0, 31));
+        });
+        XLSX.writeFile(wb, 'distrisol-vendas.xlsx');
+    };
     return (React.createElement(TabWatermark, null,
         React.createElement("div", null,
-            React.createElement("h2", { className: "font-semibold text-base mb-3", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, "Vendas"),
+            React.createElement("div", { className: "flex items-center justify-between mb-3" },
+                React.createElement("h2", { className: "font-semibold text-base", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, "Vendas"),
+                React.createElement("button", { onClick: handleExport, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar Excel")),
             React.createElement("div", { className: "flex gap-2 overflow-x-auto pb-1 mb-4 -mx-1 px-1" }, VENDAS_MODALIDADES.map((m) => {
                 const Icon = m.icon;
                 const active = sub === m.key;
