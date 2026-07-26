@@ -1020,8 +1020,24 @@ function FinanceiroTemplatesSection({ collection }) {
     const filtrados = collection.items.filter((i) => i.categoria === subCategoria);
     const filteredCollection = { ...collection, items: filtrados };
     const fieldsComDefault = TEMPLATE_FIELDS.map((f) => f.key === 'categoria' ? { ...f, default: subCategoria } : f);
+    const handleExportTemplates = () => {
+        const buildRows = (categoria) => collection.items
+            .filter((i) => i.categoria === categoria)
+            .map((i) => ({
+                'Nome': i.nome,
+                'Tipo': i.tipo,
+                'Valor padrão (R$)': Number(i.valorPadrao) || 0,
+                'Dia do vencimento': i.diaVencimento,
+            }));
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(buildRows('Fixa')), 'Fixas');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(buildRows('Variável')), 'Variáveis');
+        XLSX.writeFile(wb, 'distrisol-contas-fixas-variaveis.xlsx');
+    };
     return (React.createElement("div", null,
-        React.createElement("p", { className: "text-xs mb-3", style: { color: 'var(--text-muted)' } }, "Cadastre aqui contas que se repetem todo m\u00EAs (aluguel, sal\u00E1rios, energia). Elas geram automaticamente uma conta pendente em \"Contas a pagar/receber\" \u2014 pras vari\u00E1veis, o valor vem em branco pra voc\u00EA ajustar quando o m\u00EAs chegar."),
+        React.createElement("div", { className: "flex items-center justify-between mb-3 gap-2" },
+            React.createElement("p", { className: "text-xs", style: { color: 'var(--text-muted)' } }, "Cadastre aqui contas que se repetem todo m\u00EAs (aluguel, sal\u00E1rios, energia). Elas geram automaticamente uma conta pendente em \"Contas a pagar/receber\" \u2014 pras vari\u00E1veis, o valor vem em branco pra voc\u00EA ajustar quando o m\u00EAs chegar."),
+            React.createElement("button", { onClick: handleExportTemplates, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full shrink-0", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar")),
         React.createElement("div", { className: "flex gap-2 mb-4" },
             React.createElement("button", { onClick: () => setSubCategoria('Fixa'), className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: subCategoria === 'Fixa' ? 'var(--navy)' : 'var(--paper-alt)', color: subCategoria === 'Fixa' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Fixas"),
             React.createElement("button", { onClick: () => setSubCategoria('Variável'), className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: subCategoria === 'Variável' ? 'var(--navy)' : 'var(--paper-alt)', color: subCategoria === 'Variável' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Vari\u00E1veis")),
