@@ -1016,9 +1016,16 @@ function FinanceiroTable({ items, update, remove }) {
                         React.createElement(Trash2, { size: 13, color: "var(--red)" }))))))))));
 }
 function FinanceiroTemplatesSection({ collection }) {
+    const [subCategoria, setSubCategoria] = useState('Fixa');
+    const filtrados = collection.items.filter((i) => i.categoria === subCategoria);
+    const filteredCollection = { ...collection, items: filtrados };
+    const fieldsComDefault = TEMPLATE_FIELDS.map((f) => f.key === 'categoria' ? { ...f, default: subCategoria } : f);
     return (React.createElement("div", null,
         React.createElement("p", { className: "text-xs mb-3", style: { color: 'var(--text-muted)' } }, "Cadastre aqui contas que se repetem todo m\u00EAs (aluguel, sal\u00E1rios, energia). Elas geram automaticamente uma conta pendente em \"Contas a pagar/receber\" \u2014 pras vari\u00E1veis, o valor vem em branco pra voc\u00EA ajustar quando o m\u00EAs chegar."),
-        React.createElement(EntitySection, { collection: collection, fields: TEMPLATE_FIELDS, title: "", addLabel: "Nova conta fixa/vari\u00E1vel", emptyLabel: "Nenhuma conta fixa ou vari\u00E1vel cadastrada ainda.", getPrimary: (i) => i.nome, getSecondary: (i) => [
+        React.createElement("div", { className: "flex gap-2 mb-4" },
+            React.createElement("button", { onClick: () => setSubCategoria('Fixa'), className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: subCategoria === 'Fixa' ? 'var(--navy)' : 'var(--paper-alt)', color: subCategoria === 'Fixa' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Fixas"),
+            React.createElement("button", { onClick: () => setSubCategoria('Variável'), className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: subCategoria === 'Variável' ? 'var(--navy)' : 'var(--paper-alt)', color: subCategoria === 'Variável' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Vari\u00E1veis")),
+        React.createElement(EntitySection, { collection: filteredCollection, fields: fieldsComDefault, title: "", addLabel: `Nova conta ${subCategoria.toLowerCase()}`, emptyLabel: `Nenhuma conta ${subCategoria.toLowerCase()} cadastrada ainda.`, getPrimary: (i) => i.nome, getSecondary: (i) => [
                 `${i.tipo} · dia ${i.diaVencimento} de cada mês`,
                 i.valorPadrao ? `Valor padrão: ${formatBRL(i.valorPadrao)}` : 'Valor varia — ajuste todo mês',
             ], getBadge: (i) => i.categoria === 'Fixa'
@@ -1047,7 +1054,7 @@ function FinanceiroTab({ collection }) {
                 add({
                     tipo: t.tipo,
                     descricao: t.nome,
-                    valor: Number(t.valorPadrao) || 0,
+                    valor: t.categoria === 'Variável' ? 0 : (Number(t.valorPadrao) || 0),
                     vencimento: vencimentoDoMes(t.diaVencimento, ano, mes),
                     status: 'Pendente',
                     obs: t.categoria,
