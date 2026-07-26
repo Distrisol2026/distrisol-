@@ -1155,6 +1155,17 @@ function FinanceiroTab({ collection }) {
     const [prazoUnidade, setPrazoUnidade] = useState('dias');
     const templates = useCollection('distrisol:financeiro-templates');
     useEffect(() => {
+        // One-time cleanup: templates used to support a 'Variável' category
+        // that no longer exists (Variáveis are now one-off entries, not
+        // recurring templates). Remove any leftover ones automatically.
+        if (templates.loading)
+            return;
+        templates.items
+            .filter((t) => t.categoria === 'Variável')
+            .forEach((t) => templates.remove(t.id));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [templates.loading, templates.items]);
+    useEffect(() => {
         if (templates.loading || loading)
             return;
         const now = new Date();
