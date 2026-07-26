@@ -328,8 +328,12 @@ function useCollection(key) {
     };
     const add = (item) => persist([{ ...item, id: crypto.randomUUID() }, ...items]);
     const update = (id, patch) => persist(items.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+    const updateMany = (updates) => {
+        const map = new Map(updates.map((u) => [u.id, u.patch]));
+        return persist(items.map((i) => (map.has(i.id) ? { ...i, ...map.get(i.id) } : i)));
+    };
     const remove = (id) => persist(items.filter((i) => i.id !== id));
-    return { items, loading, error, add, update, remove };
+    return { items, loading, error, add, update, updateMany, remove };
 }
 // ---------- shared UI ----------
 function RecordModal({ title, fields, initial, onClose, onSave }) {
@@ -451,13 +455,15 @@ function MovimentoModal({ produtos, onClose, onSave }) {
     const [quantidade, setQuantidade] = useState('');
     const [data, setData] = useState(() => new Date().toISOString().slice(0, 10));
     const [obs, setObs] = useState('');
+    const [lote, setLote] = useState('');
+    const [validade, setValidade] = useState('');
     const [saving, setSaving] = useState(false);
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (!produtoId || !quantidade)
             return;
         setSaving(true);
-        await onSave({ produtoId, tipo, quantidade: Number(quantidade), data, obs });
+        await onSave({ produtoId, tipo, quantidade: Number(quantidade), data, obs, lote: tipo === 'Entrada' ? lote : '', validade: tipo === 'Entrada' ? validade : '' });
         setSaving(false);
     };
     const inputStyle = { borderColor: 'var(--line)', background: 'white', color: 'var(--text)' };
@@ -494,6 +500,14 @@ function MovimentoModal({ produtos, onClose, onSave }) {
                     React.createElement("div", null,
                         React.createElement("label", { className: "block text-xs font-medium mb-1", style: { color: 'var(--text-muted)' } }, "Quantidade *"),
                         React.createElement("input", { type: "number", min: "0", step: "1", value: quantidade, required: true, onChange: (e) => setQuantidade(e.target.value), className: "w-full rounded-lg px-3 py-2 text-sm border", style: inputStyle })),
+                    tipo === 'Entrada' && (React.createElement(React.Fragment, null,
+                        React.createElement("div", null,
+                            React.createElement("label", { className: "block text-xs font-medium mb-1", style: { color: 'var(--text-muted)' } }, "Lote (opcional)"),
+                            React.createElement("input", { type: "text", value: lote, onChange: (e) => setLote(e.target.value), placeholder: "N\u00BA do lote", className: "w-full rounded-lg px-3 py-2 text-sm border", style: inputStyle })),
+                        React.createElement("div", null,
+                            React.createElement("label", { className: "block text-xs font-medium mb-1", style: { color: 'var(--text-muted)' } }, "Validade (opcional)"),
+                            React.createElement("input", { type: "date", value: validade, onChange: (e) => setValidade(e.target.value), className: "w-full rounded-lg px-3 py-2 text-sm border", style: inputStyle }),
+                            React.createElement("p", { className: "text-xs mt-1", style: { color: 'var(--text-muted)' } }, "Nas sa\u00EDdas o app d\u00E1 baixa sozinho no lote que vence primeiro (n\u00E3o precisa escolher).")))),
                     React.createElement("div", null,
                         React.createElement("label", { className: "block text-xs font-medium mb-1", style: { color: 'var(--text-muted)' } }, "Data"),
                         React.createElement("input", { type: "date", value: data, onChange: (e) => setData(e.target.value), className: "w-full rounded-lg px-3 py-2 text-sm border", style: inputStyle })),
@@ -631,6 +645,7 @@ function ImportEstoqueModal({ collection, onClose }) {
 }
 function EstoqueTab({ collection }) {
     const movimentos = useCollection('distrisol:estoque-movimentos');
+    const lotes = useCollection('distrisol:estoque-lotes');
     const [movModalOpen, setMovModalOpen] = useState(false);
     const [importModalOpen, setImportModalOpen] = useState(false);
     const handleMovimento = async (mov) => {
@@ -640,13 +655,71 @@ function EstoqueTab({ collection }) {
         const delta = mov.tipo === 'Entrada' ? mov.quantidade : -mov.quantidade;
         const novaQtd = Math.max(0, Number(produto.quantidade || 0) + delta);
         await collection.update(produto.id, { quantidade: novaQtd });
+        if (mov.tipo === 'Entrada') {
+            const loteExistente = mov.lote
+                ? lotes.items.find((l) => l.produtoId === mov.produtoId && l.lote === mov.lote)
+                : null;
+            if (loteExistente) {
+                await lotes.update(loteExistente.id, {
+                    quantidade: Number(loteExistente.quantidade || 0) + mov.quantidade,
+                    validade: mov.validade || loteExistente.validade,
+                });
+            }
+            else {
+                await lotes.add({ produtoId: produto.id, produtoNome: produto.nome, lote: mov.lote || '', validade: mov.validade || '', quantidade: mov.quantidade });
+            }
+        }
+        else {
+            // Saída: baixa automática por FEFO — desconta primeiro do lote que vence mais cedo.
+            // Lotes sem validade cadastrada ficam por último (não sabemos priorizá-los).
+            let restante = mov.quantidade;
+            const lotesProduto = [...lotes.items]
+                .filter((l) => l.produtoId === mov.produtoId && Number(l.quantidade) > 0)
+                .sort((a, b) => {
+                if (!a.validade)
+                    return 1;
+                if (!b.validade)
+                    return -1;
+                return new Date(a.validade) - new Date(b.validade);
+            });
+            const patches = [];
+            for (const l of lotesProduto) {
+                if (restante <= 0)
+                    break;
+                const deduz = Math.min(Number(l.quantidade), restante);
+                patches.push({ id: l.id, patch: { quantidade: Number(l.quantidade) - deduz } });
+                restante -= deduz;
+            }
+            if (patches.length > 0)
+                await lotes.updateMany(patches);
+        }
         await movimentos.add({ ...mov, produtoNome: produto.nome });
         setMovModalOpen(false);
+    };
+    const validadeInfo = (produtoId) => {
+        const lotesDoProduto = lotes.items.filter((l) => l.produtoId === produtoId && Number(l.quantidade) > 0);
+        if (lotesDoProduto.length === 0)
+            return null;
+        const comValidade = [...lotesDoProduto]
+            .filter((l) => l.validade)
+            .sort((a, b) => new Date(a.validade) - new Date(b.validade));
+        if (comValidade.length === 0)
+            return `${lotesDoProduto.length} lote(s) em estoque, sem validade cadastrada`;
+        const proximo = comValidade[0];
+        const d = diasParaVencer(proximo.validade);
+        const rotulo = proximo.lote ? `lote ${proximo.lote}` : 's/ nº de lote';
+        const extra = lotesDoProduto.length > 1 ? ` · ${lotesDoProduto.length} lotes` : '';
+        if (d < 0)
+            return `⚠️ Vencido há ${Math.abs(d)}d (${rotulo})${extra}`;
+        if (d <= 30)
+            return `⚠️ Vence em ${d}d (${rotulo})${extra}`;
+        return `Validade mais próxima: ${formatDate(proximo.validade)} (${rotulo})${extra}`;
     };
     return (React.createElement(TabWatermark, null,
         React.createElement(EntitySection, { collection: collection, fields: ESTOQUE_FIELDS, title: "Estoque", addLabel: "Novo item", emptyLabel: "Nenhum item cadastrado. Adicione o primeiro produto do estoque.", headerExtra: React.createElement("button", { onClick: () => setImportModalOpen(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Importar planilha"), getPrimary: (i) => i.nome, getSecondary: (i) => [
                 `${i.categoria || 'Sem categoria'} · ${i.quantidade} ${i.unidade || 'un'}`,
                 i.precoUnit ? `Preço unit.: ${formatBRL(i.precoUnit)}` : null,
+                validadeInfo(i.id),
             ], getBadge: (i) => Number(i.quantidade) <= Number(i.estoqueMinimo || 0)
                 ? { text: 'Estoque baixo', bg: 'var(--red-soft)', color: 'var(--red)' }
                 : { text: 'Estoque ok', bg: 'var(--green-soft)', color: 'var(--green)' } }),
@@ -661,12 +734,36 @@ function EstoqueTab({ collection }) {
                     React.createElement("p", { className: "text-sm font-medium truncate", style: { color: 'var(--navy)' } }, m.produtoNome),
                     React.createElement("p", { className: "text-xs", style: { color: 'var(--text-muted)' } },
                         formatDate(m.data),
+                        m.lote ? ' · lote ' + m.lote : '',
                         m.obs ? ' · ' + m.obs : '')),
                 React.createElement("span", { className: "text-xs font-medium px-2 py-0.5 rounded-full shrink-0", style: { background: m.tipo === 'Entrada' ? 'var(--green-soft)' : 'var(--red-soft)', color: m.tipo === 'Entrada' ? 'var(--green)' : 'var(--red)' } },
                     m.tipo === 'Entrada' ? '+' : '-',
                     m.quantidade),
                 React.createElement("button", { onClick: () => movimentos.remove(m.id), className: "p-1.5 rounded-lg shrink-0", style: { background: 'var(--red-soft)' } },
                     React.createElement(Trash2, { size: 13, color: "var(--red)" })))))))),
+        React.createElement("div", { className: "mt-6" },
+            React.createElement("h3", { className: "text-sm font-semibold mb-3", style: { color: 'var(--navy)' } }, "Lotes em estoque"),
+            lotes.loading ? (React.createElement("p", { className: "text-sm", style: { color: 'var(--text-muted)' } }, "Carregando...")) : lotes.items.filter((l) => Number(l.quantidade) > 0).length === 0 ? (React.createElement("div", { className: "rounded-xl p-4 text-center text-xs", style: { background: 'var(--paper-alt)', color: 'var(--text-muted)' } }, "Nenhum lote com validade cadastrado ainda. Informe lote e validade ao registrar uma entrada.")) : (React.createElement("div", { className: "space-y-2" }, [...lotes.items].filter((l) => Number(l.quantidade) > 0).sort((a, b) => {
+                if (!a.validade)
+                    return 1;
+                if (!b.validade)
+                    return -1;
+                return new Date(a.validade) - new Date(b.validade);
+            }).map((l) => {
+                const d = l.validade ? diasParaVencer(l.validade) : null;
+                const tone = d === null ? { bg: 'var(--paper-alt)', color: 'var(--text-muted)' } : d < 0 ? { bg: 'var(--red-soft)', color: 'var(--red)' } : d <= 30 ? { bg: '#FBF0DC', color: '#9C6B1A' } : { bg: 'var(--green-soft)', color: 'var(--green)' };
+                return (React.createElement("div", { key: l.id, className: "rounded-xl p-3.5 flex items-center justify-between gap-2", style: { background: 'white', border: '1px solid var(--line)' } },
+                    React.createElement("div", { className: "min-w-0 flex-1" },
+                        React.createElement("p", { className: "text-sm font-medium truncate", style: { color: 'var(--navy)' } }, l.produtoNome),
+                        React.createElement("p", { className: "text-xs", style: { color: 'var(--text-muted)' } },
+                            l.lote ? 'Lote ' + l.lote : 'Sem nº de lote',
+                            ' · ',
+                            l.quantidade,
+                            ' un')),
+                    React.createElement("span", { className: "text-xs font-medium px-2 py-0.5 rounded-full shrink-0", style: { background: tone.bg, color: tone.color } }, l.validade ? formatDate(l.validade) : 'sem validade'),
+                    React.createElement("button", { onClick: () => lotes.remove(l.id), className: "p-1.5 rounded-lg shrink-0", style: { background: 'var(--red-soft)' } },
+                        React.createElement(Trash2, { size: 13, color: "var(--red)" }))));
+            })))),
         movModalOpen && (React.createElement(MovimentoModal, { produtos: collection.items, onClose: () => setMovModalOpen(false), onSave: handleMovimento })),
         importModalOpen && (React.createElement(ImportEstoqueModal, { collection: collection, onClose: () => setImportModalOpen(false) }))));
 }
