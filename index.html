@@ -215,6 +215,85 @@ const buildICSDataUri = (title, dateStr, notes) => {
     ].filter(Boolean).join('\r\n');
     return 'data:text/calendar;charset=utf-8,' + encodeURIComponent(ics);
 };
+// Like buildICSDataUri, but creates a recurring monthly reminder (RRULE)
+// instead of a single-date event — used for Fixas/Variáveis templates,
+// since those repeat every month on the same day rather than a fixed date.
+const buildRecurringICSDataUri = (title, diaVencimento, notes) => {
+    const now = new Date();
+    let ano = now.getFullYear();
+    let mes = now.getMonth() + 1;
+    let startDate = vencimentoDoMes(diaVencimento, ano, mes);
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    if (new Date(startDate + 'T00:00:00') < hoje) {
+        mes += 1;
+        if (mes > 12) {
+            mes = 1;
+            ano += 1;
+        }
+        startDate = vencimentoDoMes(diaVencimento, ano, mes);
+    }
+    const dt = startDate.replace(/-/g, '');
+    const esc = (s) => String(s || '').replace(/\r?\n/g, ' ');
+    const ics = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Distrisol//App//PT',
+        'BEGIN:VEVENT',
+        'UID:' + dt + '-' + Math.random().toString(36).slice(2) + '@distrisol',
+        'DTSTAMP:' + dt + 'T090000Z',
+        'DTSTART;VALUE=DATE:' + dt,
+        'DTEND;VALUE=DATE:' + dt,
+        'RRULE:FREQ=MONTHLY;BYMONTHDAY=' + diaVencimento,
+        'SUMMARY:' + esc(title),
+        notes ? 'DESCRIPTION:' + esc(notes) : '',
+        'BEGIN:VALARM',
+        'ACTION:DISPLAY',
+        'DESCRIPTION:Lembrete',
+        'TRIGGER:-P1D',
+        'END:VALARM',
+        'END:VEVENT',
+        'END:VCALENDAR',
+    ].filter(Boolean).join('\r\n');
+    return 'data:text/calendar;charset=utf-8,' + encodeURIComponent(ics);
+};
+// Builds a worksheet with sensible column widths and number/date formatting
+// so exported files are easier to read on a phone screen, not just a laptop.
+// Note: the free SheetJS build doesn't support bold/colored headers — that
+// requires the paid Pro version — but widths and number formats do work.
+const buildStyledSheet = (rows, opts) => {
+    opts = opts || {};
+    const widths = opts.widths || {};
+    const currencyCols = opts.currencyCols || [];
+    const dateCols = opts.dateCols || [];
+    const ws = XLSX.utils.json_to_sheet(rows);
+    if (!ws['!ref'])
+        return ws;
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    const headers = [];
+    for (let c = range.s.c; c <= range.e.c; c++) {
+        const ref = XLSX.utils.encode_cell({ r: range.s.r, c });
+        headers[c] = ws[ref] ? ws[ref].v : undefined;
+    }
+    ws['!cols'] = headers.map((h) => ({ wch: widths[h] || 16 }));
+    for (let r = range.s.r + 1; r <= range.e.r; r++) {
+        for (let c = range.s.c; c <= range.e.c; c++) {
+            const h = headers[c];
+            const ref = XLSX.utils.encode_cell({ r, c });
+            const cell = ws[ref];
+            if (!cell)
+                continue;
+            if (currencyCols.includes(h) && typeof cell.v === 'number') {
+                cell.z = '"R$" #,##0.00';
+            }
+            if (dateCols.includes(h) && cell.v instanceof Date) {
+                cell.t = 'd';
+                cell.z = 'dd/mm/yyyy';
+            }
+        }
+    }
+    return ws;
+};
 // ---------- field configs ----------
 const ESTOQUE_FIELDS = [
     { key: 'nome', label: 'Produto', type: 'text', required: true },
@@ -279,6 +358,7 @@ const DOCUMENTOS_FIELDS = [
     { key: 'tipo', label: 'Tipo', type: 'text' },
     { key: 'vencimento', label: 'Vencimento (se tiver validade)', type: 'date' },
     { key: 'link', label: 'Link do arquivo (Drive, iCloud...)', type: 'text' },
+    { key: 'grupo', label: 'Grupo (ex: Cadastro Fornecedor XYZ)', type: 'text' },
     { key: 'notas', label: 'Notas', type: 'text' },
 ];
 const TEMPLATE_FIELDS = [
@@ -671,12 +751,12 @@ function EstoqueTab({ collection }) {
             .map((l) => ({
             'Produto': l.produtoNome,
             'Lote': l.lote || '',
-            'Validade': l.validade ? formatDate(l.validade) : '',
+            'Validade': l.validade ? new Date(l.validade + 'T00:00:00') : '',
             'Quantidade': l.quantidade,
         }));
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Estoque');
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(loteRows), 'Lotes');
+        XLSX.utils.book_append_sheet(wb, buildStyledSheet(rows, { widths: { 'Produto': 28, 'Categoria': 18, 'Quantidade': 12, 'Unidade': 10, 'Estoque mínimo': 14, 'Preço unitário (R$)': 16 }, currencyCols: ['Preço unitário (R$)'] }), 'Estoque');
+        XLSX.utils.book_append_sheet(wb, buildStyledSheet(loteRows, { widths: { 'Produto': 28, 'Lote': 14, 'Validade': 14, 'Quantidade': 12 }, dateCols: ['Validade'] }), 'Lotes');
         XLSX.writeFile(wb, 'distrisol-estoque.xlsx');
     };
     const handleMovimento = async (mov) => {
@@ -1029,9 +1109,10 @@ function FinanceiroTemplatesSection({ collection }) {
                 'Valor padrão (R$)': Number(i.valorPadrao) || 0,
                 'Dia do vencimento': i.diaVencimento,
             }));
+        const opts = { widths: { 'Nome': 28, 'Tipo': 12, 'Valor padrão (R$)': 16, 'Dia do vencimento': 16 }, currencyCols: ['Valor padrão (R$)'] };
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(buildRows('Fixa')), 'Fixas');
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(buildRows('Variável')), 'Variáveis');
+        XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRows('Fixa'), opts), 'Fixas');
+        XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRows('Variável'), opts), 'Variáveis');
         XLSX.writeFile(wb, 'distrisol-contas-fixas-variaveis.xlsx');
     };
     return (React.createElement("div", null,
@@ -1046,7 +1127,8 @@ function FinanceiroTemplatesSection({ collection }) {
                 i.valorPadrao ? `Valor padrão: ${formatBRL(i.valorPadrao)}` : 'Valor varia — ajuste todo mês',
             ], getBadge: (i) => i.categoria === 'Fixa'
                 ? { text: 'Fixa', bg: 'var(--green-soft)', color: 'var(--green)' }
-                : { text: 'Variável', bg: '#FBF0DC', color: '#9C6B1A' } })));
+                : { text: 'Variável', bg: '#FBF0DC', color: '#9C6B1A' }, getExtraAction: (i) => (i.diaVencimento ? React.createElement("a", { href: buildRecurringICSDataUri(`${i.tipo}: ${i.nome}`, i.diaVencimento, i.categoria), download: `lembrete-mensal-${i.id}.ics`, className: "p-1.5 rounded-lg", style: { background: 'var(--paper-alt)' }, title: "Lembrete mensal no Calend\u00E1rio" },
+                React.createElement(CalendarPlus, { size: 14, color: "var(--navy)" })) : null) })));
 }
 function FinanceiroTab({ collection }) {
     const { items, loading, error, add, update, remove } = collection;
@@ -1106,17 +1188,16 @@ function FinanceiroTab({ collection }) {
         const buildRows = (list) => [...list]
             .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
             .map((i) => ({
-                'Vencimento': formatDate(i.vencimento),
+                'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
                 'Descrição': i.descricao,
                 'Valor (R$)': Number(i.valor) || 0,
                 'Status': i.status,
                 'Observação': i.obs || '',
             }));
+        const opts = { widths: { 'Vencimento': 14, 'Descrição': 34, 'Valor (R$)': 14, 'Status': 12, 'Observação': 26 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] };
         const wb = XLSX.utils.book_new();
-        const wsPagar = XLSX.utils.json_to_sheet(buildRows(pagar));
-        const wsReceber = XLSX.utils.json_to_sheet(buildRows(receber));
-        XLSX.utils.book_append_sheet(wb, wsPagar, 'A Pagar');
-        XLSX.utils.book_append_sheet(wb, wsReceber, 'A Receber');
+        XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRows(pagar), opts), 'A Pagar');
+        XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRows(receber), opts), 'A Receber');
         XLSX.writeFile(wb, 'distrisol-contas.xlsx');
     };
     const badgeFor = (item) => {
@@ -1228,15 +1309,25 @@ function VendasTab({ collections }) {
     const handleExport = () => {
         const wb = XLSX.utils.book_new();
         VENDAS_MODALIDADES.forEach((m) => {
+            const widths = {};
+            const currencyCols = [];
+            const dateCols = [];
+            m.fields.forEach((f) => {
+                widths[f.label] = f.type === 'text' ? 26 : 16;
+                if (f.type === 'number')
+                    currencyCols.push(f.label);
+                if (f.type === 'date')
+                    dateCols.push(f.label);
+            });
             const rows = collections[m.key].items.map((i) => {
                 const row = {};
                 m.fields.forEach((f) => {
                     const v = i[f.key];
-                    row[f.label] = f.type === 'date' ? formatDate(v) : f.type === 'number' ? (Number(v) || 0) : (v ?? '');
+                    row[f.label] = f.type === 'date' ? (v ? new Date(v + 'T00:00:00') : '') : f.type === 'number' ? (Number(v) || 0) : (v ?? '');
                 });
                 return row;
             });
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), m.label.slice(0, 31));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rows, { widths, currencyCols, dateCols }), m.label.slice(0, 31));
         });
         XLSX.writeFile(wb, 'distrisol-vendas.xlsx');
     };
@@ -1267,6 +1358,20 @@ function AgendaTab({ collection, financeiro }) {
         setModalOpen(false);
         setEditing(null);
     };
+    const handleExport = () => {
+        const rows = [...items]
+            .sort((a, b) => new Date(a.data) - new Date(b.data))
+            .map((i) => ({
+                'Compromisso': i.titulo,
+                'Data': i.data ? new Date(i.data + 'T00:00:00') : '',
+                'Hora': i.hora || '',
+                'Notas': i.notas || '',
+            }));
+        const ws = buildStyledSheet(rows, { widths: { 'Compromisso': 30, 'Data': 14, 'Hora': 10, 'Notas': 34 }, dateCols: ['Data'] });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Agenda');
+        XLSX.writeFile(wb, 'distrisol-agenda.xlsx');
+    };
     const alertasFinanceiros = useMemo(() => {
         return financeiro.items
             .filter((i) => i.status !== 'Concluído')
@@ -1277,11 +1382,13 @@ function AgendaTab({ collection, financeiro }) {
     const timeline = [...compromissos, ...alertasFinanceiros].sort((a, b) => new Date(a.data) - new Date(b.data));
     return (React.createElement(TabWatermark, null,
         React.createElement("div", null,
-            React.createElement("div", { className: "flex items-center justify-between mb-3" },
+            React.createElement("div", { className: "flex items-center justify-between mb-3 gap-2" },
                 React.createElement("h2", { className: "font-semibold text-base", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, "Agenda"),
-                React.createElement("button", { onClick: () => { setEditing(null); setModalOpen(true); }, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } },
-                    React.createElement(Plus, { size: 14 }),
-                    " Novo compromisso")),
+                React.createElement("div", { className: "flex gap-2" },
+                    React.createElement("button", { onClick: handleExport, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar Excel"),
+                    React.createElement("button", { onClick: () => { setEditing(null); setModalOpen(true); }, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } },
+                        React.createElement(Plus, { size: 14 }),
+                    " Novo compromisso"))),
             error && React.createElement("p", { className: "text-xs mb-2", style: { color: 'var(--red)' } }, error),
             loading ? (React.createElement("p", { className: "text-sm", style: { color: 'var(--text-muted)' } }, "Carregando...")) : timeline.length === 0 ? (React.createElement("div", { className: "rounded-xl p-6 text-center text-sm", style: { background: 'var(--paper-alt)', color: 'var(--text-muted)' } }, "Nenhum compromisso ou vencimento pr\u00F3ximo.")) : (React.createElement("div", { className: "space-y-2" }, timeline.map((item) => item.tipo === 'compromisso' ? (React.createElement(RecordCard, { key: item.id, primaryLabel: item.titulo, secondaryLines: [`${formatDate(item.data)}${item.hora ? ' às ' + item.hora : ''}`, item.notas], badge: null, onEdit: () => { setEditing(item); setModalOpen(true); }, onDelete: () => remove(item.id) })) : (React.createElement("div", { key: item.id, className: "rounded-xl p-4 flex items-start gap-3", style: { background: 'var(--paper-alt)', border: '1px dashed var(--line)' } },
                 React.createElement(Clock, { size: 16, color: "var(--text-muted)", className: "mt-0.5 shrink-0" }),
@@ -1401,6 +1508,28 @@ function PinGate({ storageKey, children }) {
             React.createElement("button", { type: "submit", className: "rounded-lg px-5 py-2 text-sm font-medium", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } }, isSetup ? 'Salvar e entrar' : 'Entrar'))));
 }
 function DocumentosTab({ collection }) {
+    const [grupoFiltro, setGrupoFiltro] = useState('Todos');
+    const grupos = useMemo(() => {
+        const set = new Set(collection.items.map((i) => i.grupo).filter(Boolean));
+        return ['Todos', ...Array.from(set).sort()];
+    }, [collection.items]);
+    const itensFiltrados = grupoFiltro === 'Todos' ? collection.items : collection.items.filter((i) => i.grupo === grupoFiltro);
+    const filteredCollection = { ...collection, items: itensFiltrados };
+    const [copyMsg, setCopyMsg] = useState('');
+    const handleOpenAll = () => {
+        itensFiltrados.filter((i) => i.link).forEach((i) => window.open(i.link, '_blank'));
+    };
+    const handleCopyList = async () => {
+        const texto = itensFiltrados.map((i) => `${i.nome}${i.link ? ' — ' + i.link : ' (sem link)'}`).join('\n');
+        try {
+            await navigator.clipboard.writeText(texto);
+            setCopyMsg('Lista copiada!');
+        }
+        catch (e) {
+            setCopyMsg('Não consegui copiar automaticamente — selecione e copie manualmente no seu app de notas.');
+        }
+        setTimeout(() => setCopyMsg(''), 3000);
+    };
     const badgeFor = (item) => {
         if (!item.vencimento)
             return null;
@@ -1432,10 +1561,34 @@ function DocumentosTab({ collection }) {
         }
         return data;
     };
+    const handleExport = () => {
+        const rows = [...collection.items]
+            .sort((a, b) => a.nome.localeCompare(b.nome))
+            .map((i) => ({
+                'Nome do documento': i.nome,
+                'Tipo': i.tipo || '',
+                'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+                'Link': i.link || '',
+                'Grupo': i.grupo || '',
+                'Notas': i.notas || '',
+            }));
+        const ws = buildStyledSheet(rows, { widths: { 'Nome do documento': 30, 'Tipo': 16, 'Vencimento': 14, 'Link': 40, 'Grupo': 22, 'Notas': 30 }, dateCols: ['Vencimento'] });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Documentos');
+        XLSX.writeFile(wb, 'distrisol-documentos.xlsx');
+    };
     return (React.createElement(TabWatermark, null,
-        React.createElement(EntitySection, { collection: collection, fields: DOCUMENTOS_FIELDS, title: "Documentos", addLabel: "Novo documento", emptyLabel: "Nenhum documento cadastrado. Adicione certid\u00F5es, licen\u00E7as, cadastros e outros documentos da empresa.", onBeforeSave: handleBeforeSave, getPrimary: (i) => i.nome, getSecondary: (i) => [
+        grupos.length > 1 && (React.createElement("div", { className: "mb-3" },
+            React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                React.createElement("select", { value: grupoFiltro, onChange: (e) => setGrupoFiltro(e.target.value), className: "text-xs font-medium px-3 py-1.5 rounded-full border", style: { borderColor: 'var(--line)', background: 'white', color: 'var(--navy)' } }, grupos.map((g) => React.createElement("option", { key: g, value: g }, g))),
+                grupoFiltro !== 'Todos' && (React.createElement(React.Fragment, null,
+                    React.createElement("button", { onClick: handleCopyList, className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Copiar lista"),
+                    React.createElement("button", { onClick: handleOpenAll, className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Abrir todos")))),
+            copyMsg && React.createElement("p", { className: "text-xs mt-1", style: { color: 'var(--green)' } }, copyMsg))),
+        React.createElement(EntitySection, { collection: filteredCollection, fields: DOCUMENTOS_FIELDS, title: "Documentos", addLabel: "Novo documento", emptyLabel: "Nenhum documento cadastrado. Adicione certid\u00F5es, licen\u00E7as, cadastros e outros documentos da empresa.", onBeforeSave: handleBeforeSave, headerExtra: React.createElement("button", { onClick: handleExport, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar Excel"), getPrimary: (i) => i.nome, getSecondary: (i) => [
                 i.tipo || null,
                 i.vencimento ? `Vencimento: ${formatDate(i.vencimento)}` : 'Sem vencimento',
+                i.grupo ? `Grupo: ${i.grupo}` : null,
                 linkStatusText(i),
                 i.notas || null,
             ], getBadge: badgeFor, getExtraAction: (i) => (React.createElement(React.Fragment, null,
@@ -1482,12 +1635,21 @@ function EmpresaTab({ storageKey }) {
         setModalOpen(false);
     };
     const hasAnyData = EMPRESA_FIELDS.some((f) => data[f.key]);
+    const handleExport = () => {
+        const rows = EMPRESA_FIELDS.map((f) => ({ 'Campo': f.label, 'Valor': data[f.key] || '' }));
+        const ws = buildStyledSheet(rows, { widths: { 'Campo': 22, 'Valor': 40 } });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Empresa');
+        XLSX.writeFile(wb, 'distrisol-empresa.xlsx');
+    };
     return (React.createElement(TabWatermark, null,
-        React.createElement("div", { className: "flex items-center justify-between mb-3" },
+        React.createElement("div", { className: "flex items-center justify-between mb-3 gap-2" },
             React.createElement("h2", { className: "font-semibold text-base", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, "Empresa"),
-            React.createElement("button", { onClick: () => setModalOpen(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } },
-                React.createElement(Pencil, { size: 14 }),
-                " Editar")),
+            React.createElement("div", { className: "flex gap-2" },
+                React.createElement("button", { onClick: handleExport, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar Excel"),
+                React.createElement("button", { onClick: () => setModalOpen(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } },
+                    React.createElement(Pencil, { size: 14 }),
+                    " Editar"))),
         error && React.createElement("p", { className: "text-xs mb-2", style: { color: 'var(--red)' } }, error),
         loading ? (React.createElement("p", { className: "text-sm", style: { color: 'var(--text-muted)' } }, "Carregando...")) : !hasAnyData ? (React.createElement("div", { className: "rounded-xl p-6 text-center text-sm", style: { background: 'var(--paper-alt)', color: 'var(--text-muted)' } }, "Nenhum dado cadastrado ainda. Toque em \"Editar\" para preencher CNPJ, endere\u00E7o e outras informa\u00E7\u00F5es da empresa.")) : (React.createElement("div", { className: "space-y-2" }, EMPRESA_FIELDS.map((f) => (React.createElement("div", { key: f.key, className: "rounded-xl p-4", style: { background: 'white', border: '1px solid var(--line)' } },
             React.createElement("p", { className: "text-xs font-medium", style: { color: 'var(--text-muted)' } }, f.label),
