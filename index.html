@@ -136,6 +136,13 @@ const CalendarPlus = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M3 10h18" }),
     React.createElement("line", { x1: "12", y1: "14", x2: "12", y2: "18" }),
     React.createElement("line", { x1: "10", y1: "16", x2: "14", y2: "16" }));
+const Eye = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" }),
+    React.createElement("circle", { cx: "12", cy: "12", r: "3" }));
+const EyeOff = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M9.9 4.24A10.94 10.94 0 0 1 12 4c6.5 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" }),
+    React.createElement("path", { d: "M6.61 6.61A18.5 18.5 0 0 0 2 12s3.5 8 10 8a9.74 9.74 0 0 0 5.39-1.61" }),
+    React.createElement("line", { x1: "2", y1: "2", x2: "22", y2: "22" }));
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
 .distrisol-app {
@@ -468,8 +475,9 @@ function RecordModal({ title, fields, initial, onClose, onSave }) {
                     } },
                     React.createElement("button", { type: "submit", disabled: saving, className: "w-full rounded-lg py-2.5 font-medium text-sm", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } }, saving ? 'Salvando...' : 'Salvar'))))));
 }
-function RecordCard({ primaryLabel, secondaryLines, badge, onEdit, onDelete, extraAction }) {
+function RecordCard({ primaryLabel, secondaryLines, badge, onEdit, onDelete, extraAction, selectable, selected, onToggleSelect }) {
     return (React.createElement("div", { className: "rounded-xl p-4 flex items-start justify-between gap-3", style: { background: 'white', border: '1px solid var(--line)' } },
+        selectable && React.createElement("input", { type: "checkbox", checked: !!selected, onChange: onToggleSelect, className: "mt-1 shrink-0", style: { width: '18px', height: '18px', accentColor: 'var(--navy)' } }),
         React.createElement("div", { className: "min-w-0 flex-1" },
             React.createElement("p", { className: "font-medium text-sm truncate", style: { color: 'var(--navy)' } }, primaryLabel),
             secondaryLines.filter(Boolean).map((l, i) => (React.createElement("p", { key: i, className: "text-xs mt-0.5", style: { color: 'var(--text-muted)' } }, l))),
@@ -492,7 +500,7 @@ function SummaryCard({ label, value, tone }) {
         React.createElement("p", { className: "text-xs font-medium", style: { color: c.color, opacity: 0.85 } }, label),
         React.createElement("p", { className: "text-lg font-semibold mt-1", style: { color: c.color, fontFamily: 'var(--font-mono)' } }, value)));
 }
-function EntitySection({ collection, fields, title, addLabel, emptyLabel, getPrimary, getSecondary, getBadge, getExtraAction, onBeforeSave, headerExtra }) {
+function EntitySection({ collection, fields, title, addLabel, emptyLabel, getPrimary, getSecondary, getBadge, getExtraAction, onBeforeSave, headerExtra, selectable, selectedIds, onToggleSelect }) {
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState(null);
     const { items, loading, error, add, update, remove } = collection;
@@ -515,7 +523,7 @@ function EntitySection({ collection, fields, title, addLabel, emptyLabel, getPri
                     " ",
                     addLabel))),
         error && React.createElement("p", { className: "text-xs mb-2", style: { color: 'var(--red)' } }, error),
-        loading ? (React.createElement("p", { className: "text-sm", style: { color: 'var(--text-muted)' } }, "Carregando...")) : items.length === 0 ? (React.createElement("div", { className: "rounded-xl p-6 text-center text-sm", style: { background: 'var(--paper-alt)', color: 'var(--text-muted)' } }, emptyLabel)) : (React.createElement("div", { className: "space-y-2" }, items.map((item) => (React.createElement(RecordCard, { key: item.id, primaryLabel: getPrimary(item), secondaryLines: getSecondary(item), badge: getBadge ? getBadge(item) : null, onEdit: () => { setEditing(item); setModalOpen(true); }, onDelete: () => remove(item.id), extraAction: getExtraAction ? getExtraAction(item) : null }))))),
+        loading ? (React.createElement("p", { className: "text-sm", style: { color: 'var(--text-muted)' } }, "Carregando...")) : items.length === 0 ? (React.createElement("div", { className: "rounded-xl p-6 text-center text-sm", style: { background: 'var(--paper-alt)', color: 'var(--text-muted)' } }, emptyLabel)) : (React.createElement("div", { className: "space-y-2" }, items.map((item) => (React.createElement(RecordCard, { key: item.id, primaryLabel: getPrimary(item), secondaryLines: getSecondary(item), badge: getBadge ? getBadge(item) : null, onEdit: () => { setEditing(item); setModalOpen(true); }, onDelete: () => remove(item.id), extraAction: getExtraAction ? getExtraAction(item) : null, selectable: selectable, selected: selectedIds ? selectedIds.has(item.id) : false, onToggleSelect: () => onToggleSelect && onToggleSelect(item.id) }))))),
         modalOpen && (React.createElement(RecordModal, { title: editing ? 'Editar' : addLabel, fields: fields, initial: editing, onClose: () => { setModalOpen(false); setEditing(null); }, onSave: handleSave }))));
 }
 // ---------- tabs ----------
@@ -1542,19 +1550,51 @@ function DocumentosTab({ collection }) {
     const itensFiltrados = grupoFiltro === 'Todos' ? collection.items : collection.items.filter((i) => i.grupo === grupoFiltro);
     const filteredCollection = { ...collection, items: itensFiltrados };
     const [copyMsg, setCopyMsg] = useState('');
-    const handleOpenAll = () => {
-        itensFiltrados.filter((i) => i.link).forEach((i) => window.open(i.link, '_blank'));
+    const [selecionando, setSelecionando] = useState(false);
+    const [selecionados, setSelecionados] = useState(new Set());
+    const toggleSelecionando = () => {
+        setSelecionando((v) => !v);
+        setSelecionados(new Set());
     };
-    const handleCopyList = async () => {
-        const texto = itensFiltrados.map((i) => `${i.nome}${i.link ? ' — ' + i.link : ' (sem link)'}`).join('\n');
+    const handleToggleSelect = (id) => {
+        setSelecionados((prev) => {
+            const next = new Set(prev);
+            if (next.has(id))
+                next.delete(id);
+            else
+                next.add(id);
+            return next;
+        });
+    };
+    const docsSelecionados = itensFiltrados.filter((i) => selecionados.has(i.id));
+    const listaTexto = (docs) => docs.map((i) => `${i.nome}${i.link ? ' — ' + i.link : ' (sem link)'}`).join('\n');
+    const handleOpenAll = () => {
+        const docs = selecionando ? docsSelecionados : itensFiltrados;
+        docs.filter((i) => i.link).forEach((i) => window.open(i.link, '_blank'));
+    };
+    const handleCopyList = async (docs) => {
         try {
-            await navigator.clipboard.writeText(texto);
+            await navigator.clipboard.writeText(listaTexto(docs));
             setCopyMsg('Lista copiada!');
         }
         catch (e) {
             setCopyMsg('Não consegui copiar automaticamente — selecione e copie manualmente no seu app de notas.');
         }
         setTimeout(() => setCopyMsg(''), 3000);
+    };
+    const handleShareSelected = async () => {
+        const texto = listaTexto(docsSelecionados);
+        if (navigator.share) {
+            try {
+                await navigator.share({ title: 'Documentos', text: texto });
+            }
+            catch (e) {
+                // usuário cancelou o compartilhamento — sem problema
+            }
+        }
+        else {
+            handleCopyList(docsSelecionados);
+        }
     };
     const badgeFor = (item) => {
         if (!item.vencimento)
@@ -1604,14 +1644,23 @@ function DocumentosTab({ collection }) {
         XLSX.writeFile(wb, 'distrisol-documentos.xlsx');
     };
     return (React.createElement(TabWatermark, null,
-        grupos.length > 1 && (React.createElement("div", { className: "mb-3" },
+        React.createElement("div", { className: "mb-3" },
             React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
-                React.createElement("select", { value: grupoFiltro, onChange: (e) => setGrupoFiltro(e.target.value), className: "text-xs font-medium px-3 py-1.5 rounded-full border", style: { borderColor: 'var(--line)', background: 'white', color: 'var(--navy)' } }, grupos.map((g) => React.createElement("option", { key: g, value: g }, g))),
-                grupoFiltro !== 'Todos' && (React.createElement(React.Fragment, null,
-                    React.createElement("button", { onClick: handleCopyList, className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Copiar lista"),
-                    React.createElement("button", { onClick: handleOpenAll, className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Abrir todos")))),
-            copyMsg && React.createElement("p", { className: "text-xs mt-1", style: { color: 'var(--green)' } }, copyMsg))),
-        React.createElement(EntitySection, { collection: filteredCollection, fields: DOCUMENTOS_FIELDS, title: "Documentos", addLabel: "Novo documento", emptyLabel: "Nenhum documento cadastrado. Adicione certid\u00F5es, licen\u00E7as, cadastros e outros documentos da empresa.", onBeforeSave: handleBeforeSave, headerExtra: React.createElement("button", { onClick: handleExport, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar Excel"), getPrimary: (i) => i.nome, getSecondary: (i) => [
+                grupos.length > 1 && React.createElement("select", { value: grupoFiltro, onChange: (e) => setGrupoFiltro(e.target.value), className: "text-xs font-medium px-3 py-1.5 rounded-full border", style: { borderColor: 'var(--line)', background: 'white', color: 'var(--navy)' } }, grupos.map((g) => React.createElement("option", { key: g, value: g }, g))),
+                grupoFiltro !== 'Todos' && !selecionando && (React.createElement(React.Fragment, null,
+                    React.createElement("button", { onClick: () => handleCopyList(itensFiltrados), className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Copiar lista"),
+                    React.createElement("button", { onClick: handleOpenAll, className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Abrir todos"))),
+                React.createElement("button", { onClick: toggleSelecionando, className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: selecionando ? 'var(--navy)' : 'var(--paper-alt)', color: selecionando ? 'var(--teal-soft)' : 'var(--navy)', border: selecionando ? 'none' : '1px solid var(--line)' } }, selecionando ? 'Cancelar seleção' : 'Selecionar documentos')),
+            selecionando && (React.createElement("div", { className: "flex items-center gap-2 flex-wrap mt-2 rounded-xl p-3", style: { background: 'var(--paper-alt)' } },
+                React.createElement("span", { className: "text-xs font-medium", style: { color: 'var(--navy)' } },
+                    selecionados.size,
+                    " selecionado(s)"),
+                selecionados.size > 0 && (React.createElement(React.Fragment, null,
+                    React.createElement("button", { onClick: () => handleCopyList(docsSelecionados), className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'white', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Copiar lista"),
+                    React.createElement("button", { onClick: handleShareSelected, className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'white', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Compartilhar"),
+                    React.createElement("button", { onClick: handleOpenAll, className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'white', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Abrir todos"))))),
+            copyMsg && React.createElement("p", { className: "text-xs mt-1", style: { color: 'var(--green)' } }, copyMsg)),
+        React.createElement(EntitySection, { collection: filteredCollection, fields: DOCUMENTOS_FIELDS, title: "Documentos", addLabel: "Novo documento", emptyLabel: "Nenhum documento cadastrado. Adicione certid\u00F5es, licen\u00E7as, cadastros e outros documentos da empresa.", onBeforeSave: handleBeforeSave, headerExtra: React.createElement("button", { onClick: handleExport, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar Excel"), selectable: selecionando, selectedIds: selecionados, onToggleSelect: handleToggleSelect, getPrimary: (i) => i.nome, getSecondary: (i) => [
                 i.tipo || null,
                 i.vencimento ? `Vencimento: ${formatDate(i.vencimento)}` : 'Sem vencimento',
                 i.grupo ? `Grupo: ${i.grupo}` : null,
@@ -1683,6 +1732,32 @@ function EmpresaTab({ storageKey }) {
         modalOpen && (React.createElement(RecordModal, { title: "Dados da empresa", fields: EMPRESA_FIELDS, initial: data, onClose: () => setModalOpen(false), onSave: handleSave }))));
 }
 function DashboardTab({ estoque, financeiro, licitacoes, cotacoes, acordos, marketplace }) {
+    const [oculto, setOculto] = useState(false);
+    useEffect(() => {
+        let mounted = true;
+        (async () => {
+            try {
+                const res = await storage.get('distrisol:valores-ocultos');
+                if (mounted && res)
+                    setOculto(res.value === 'true');
+            }
+            catch (e) {
+                // sem preferência salva ainda — mantém visível por padrão
+            }
+        })();
+        return () => { mounted = false; };
+    }, []);
+    const toggleOculto = async () => {
+        const next = !oculto;
+        setOculto(next);
+        try {
+            await storage.set('distrisol:valores-ocultos', String(next));
+        }
+        catch (e) {
+            // segue funcionando nesta sessão mesmo se não conseguir salvar a preferência
+        }
+    };
+    const mostrarValor = (v) => (oculto ? '••••••' : formatBRL(v));
     const estoqueBaixo = estoque.items.filter((i) => Number(i.quantidade) <= Number(i.estoqueMinimo || 0));
     const pagarPendente = financeiro.items.filter((i) => i.tipo === 'Pagar' && i.status !== 'Concluído');
     const receberPendente = financeiro.items.filter((i) => i.tipo === 'Receber' && i.status !== 'Concluído');
@@ -1708,7 +1783,9 @@ function DashboardTab({ estoque, financeiro, licitacoes, cotacoes, acordos, mark
                 opacity: 0.55, pointerEvents: 'none', zIndex: 0,
             } }),
         React.createElement("div", { style: { position: 'relative', zIndex: 1 } },
-            React.createElement("h2", { className: "font-semibold text-base mb-1", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, "Vis\u00E3o geral"),
+            React.createElement("div", { className: "flex items-start justify-between gap-2 mb-1" },
+                React.createElement("h2", { className: "font-semibold text-base", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, "Vis\u00E3o geral"),
+                React.createElement("button", { onClick: toggleOculto, className: "p-1.5 rounded-lg shrink-0", style: { background: 'white', border: '1px solid var(--line)' }, title: oculto ? 'Mostrar valores' : 'Esconder valores' }, oculto ? React.createElement(EyeOff, { size: 16, color: "var(--navy)" }) : React.createElement(Eye, { size: 16, color: "var(--navy)" }))),
             React.createElement("p", { className: "text-xs mb-3", style: { color: 'var(--text-muted)' } },
                 "Resumo do neg\u00F3cio hoje, ",
                 formatDate(new Date().toISOString().slice(0, 10))),
@@ -1717,9 +1794,9 @@ function DashboardTab({ estoque, financeiro, licitacoes, cotacoes, acordos, mark
                 " distrisol.com.br"),
             React.createElement("div", { className: "grid grid-cols-2 gap-3 mb-3" },
                 React.createElement(SummaryCard, { label: "Estoque baixo", value: String(estoqueBaixo.length), tone: estoqueBaixo.length > 0 ? 'red' : 'green' }),
-                React.createElement(SummaryCard, { label: "Saldo previsto", value: formatBRL(saldoPrevisto), tone: saldoPrevisto >= 0 ? 'green' : 'red' }),
-                React.createElement(SummaryCard, { label: "A pagar (pendente)", value: formatBRL(totalPagar), tone: "red" }),
-                React.createElement(SummaryCard, { label: "A receber (pendente)", value: formatBRL(totalReceber), tone: "green" })),
+                React.createElement(SummaryCard, { label: "Saldo previsto", value: mostrarValor(saldoPrevisto), tone: saldoPrevisto >= 0 ? 'green' : 'red' }),
+                React.createElement(SummaryCard, { label: "A pagar (pendente)", value: mostrarValor(totalPagar), tone: "red" }),
+                React.createElement(SummaryCard, { label: "A receber (pendente)", value: mostrarValor(totalReceber), tone: "green" })),
             atrasados.length > 0 && (React.createElement("div", { className: "mb-5" },
                 React.createElement("h3", { className: "text-sm font-semibold mb-2", style: { color: 'var(--red)' } },
                     "Contas em atraso (",
@@ -1730,7 +1807,7 @@ function DashboardTab({ estoque, financeiro, licitacoes, cotacoes, acordos, mark
                     return (React.createElement("div", { key: item.id, className: "rounded-xl p-3.5", style: { background: 'var(--red-soft)', border: '1px solid #F0C4C0' } },
                         React.createElement("div", { className: "flex items-start justify-between gap-2" },
                             React.createElement("p", { className: "text-sm font-medium", style: { color: 'var(--navy)' } }, item.descricao || 'Sem nome'),
-                            React.createElement("span", { className: "text-xs font-medium shrink-0", style: { color: 'var(--red)' } }, formatBRL(item.valor))),
+                            React.createElement("span", { className: "text-xs font-medium shrink-0", style: { color: 'var(--red)' } }, mostrarValor(item.valor))),
                         React.createElement("p", { className: "text-xs mt-0.5", style: { color: 'var(--red)' } },
                             item.tipo === 'Receber' ? 'A receber de' : 'A pagar para',
                             " \u00B7 vencida h\u00E1 ",
@@ -1758,7 +1835,7 @@ function DashboardTab({ estoque, financeiro, licitacoes, cotacoes, acordos, mark
                             item.tipo,
                             " \u00B7 ",
                             formatDate(item.vencimento))),
-                    React.createElement("span", { className: "text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ml-2", style: { background: tone.bg, color: tone.color } }, formatBRL(item.valor))));
+                    React.createElement("span", { className: "text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ml-2", style: { background: tone.bg, color: tone.color } }, mostrarValor(item.valor))));
             }))))));
 }
 function Logo({ small }) {
