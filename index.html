@@ -143,6 +143,9 @@ const EyeOff = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M9.9 4.24A10.94 10.94 0 0 1 12 4c6.5 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" }),
     React.createElement("path", { d: "M6.61 6.61A18.5 18.5 0 0 0 2 12s3.5 8 10 8a9.74 9.74 0 0 0 5.39-1.61" }),
     React.createElement("line", { x1: "2", y1: "2", x2: "22", y2: "22" }));
+const Search = (p) => React.createElement(Icon, { ...p },
+    React.createElement("circle", { cx: "11", cy: "11", r: "8" }),
+    React.createElement("line", { x1: "21", y1: "21", x2: "16.65", y2: "16.65" }));
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
 .distrisol-app {
@@ -166,6 +169,12 @@ const CSS = `
 .distrisol-app input:focus, .distrisol-app select:focus, .distrisol-app button:focus-visible {
   outline: 2px solid var(--teal);
   outline-offset: 1px;
+}
+.printable-report { display: none; }
+@media print {
+  body * { visibility: hidden; }
+  .printable-report, .printable-report * { visibility: visible; }
+  .printable-report { display: block; position: absolute; top: 0; left: 0; width: 100%; }
 }
 `;
 // Logo assets (embedded so the app works standalone without external hosting)
@@ -300,6 +309,16 @@ const buildStyledSheet = (rows, opts) => {
         }
     }
     return ws;
+};
+// Records the timestamp of the most recent export, so the Dashboard can show
+// "last backup" info regardless of which export button was used.
+const registrarUltimoBackup = async () => {
+    try {
+        await storage.set('distrisol:ultimo-backup', new Date().toISOString());
+    }
+    catch (e) {
+        // não é crítico se isso falhar — só afeta o lembrete, não o export em si
+    }
 };
 // ---------- field configs ----------
 const ESTOQUE_FIELDS = [
@@ -536,6 +555,36 @@ function TabWatermark({ children }) {
             } }),
         React.createElement("div", { style: { position: 'relative', zIndex: 1 } }, children)));
 }
+// Renders a print-only report. Stays hidden on screen (see .printable-report
+// CSS) and only shows up when the browser's print/"Save as PDF" dialog is
+// triggered, so the person can generate a PDF without any extra library.
+function PrintableReport({ title, subtitle, sections }) {
+    const renderSection = (sec, i) => {
+        let body;
+        if (sec.rows && sec.rows.length > 0) {
+            const trs = sec.rows.map((row, j) => {
+                const tds = row.map((cell, k) => React.createElement("td", { key: k, style: { padding: '4px 8px', borderBottom: '1px solid #eee' } }, cell));
+                return React.createElement("tr", { key: j }, tds);
+            });
+            body = React.createElement("table", { style: { width: '100%', borderCollapse: 'collapse', fontSize: '11px' } }, React.createElement("tbody", null, trs));
+        }
+        else {
+            body = React.createElement("p", { style: { fontSize: '11px', color: '#777' } }, sec.empty || 'Nenhum registro.');
+        }
+        return React.createElement("div", { key: i, style: { marginBottom: '20px', pageBreakInside: 'avoid' } },
+            React.createElement("h2", { style: { fontSize: '14px', borderBottom: '1px solid #ccc', paddingBottom: '4px', marginBottom: '8px' } }, sec.heading),
+            body);
+    };
+    return (React.createElement("div", { className: "printable-report", style: { padding: '32px', fontFamily: 'Arial, sans-serif', color: '#111' } },
+        React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '4px' } },
+            React.createElement("img", { src: LOGO_SYMBOL, alt: "", style: { width: 32, height: 32 } }),
+            React.createElement("h1", { style: { fontSize: '20px', margin: 0 } }, title)),
+        subtitle && React.createElement("p", { style: { fontSize: '12px', color: '#555', marginBottom: '20px' } }, subtitle),
+        sections.map(renderSection),
+        React.createElement("p", { style: { fontSize: '9px', color: '#999', marginTop: '24px' } },
+            "Gerado pelo Distrisol Admin em ",
+            new Date().toLocaleString('pt-BR'))));
+}
 function MovimentoModal({ produtos, onClose, onSave }) {
     const [produtoId, setProdutoId] = useState(produtos[0]?.id || '');
     const [tipo, setTipo] = useState('Entrada');
@@ -735,7 +784,7 @@ function EstoqueTab({ collection }) {
     const lotes = useCollection('distrisol:estoque-lotes');
     const [movModalOpen, setMovModalOpen] = useState(false);
     const [importModalOpen, setImportModalOpen] = useState(false);
-    const handleExport = () => {
+    const handleExport = async () => {
         const rows = [...collection.items]
             .sort((a, b) => a.nome.localeCompare(b.nome))
             .map((i) => ({
@@ -765,6 +814,7 @@ function EstoqueTab({ collection }) {
         XLSX.utils.book_append_sheet(wb, buildStyledSheet(rows, { widths: { 'Produto': 28, 'Categoria': 18, 'Quantidade': 12, 'Unidade': 10, 'Estoque mínimo': 14, 'Preço unitário (R$)': 16 }, currencyCols: ['Preço unitário (R$)'] }), 'Estoque');
         XLSX.utils.book_append_sheet(wb, buildStyledSheet(loteRows, { widths: { 'Produto': 28, 'Lote': 14, 'Validade': 14, 'Quantidade': 12 }, dateCols: ['Validade'] }), 'Lotes');
         XLSX.writeFile(wb, 'distrisol-estoque.xlsx');
+        await registrarUltimoBackup();
     };
     const handleMovimento = async (mov) => {
         const produto = collection.items.find((p) => p.id === mov.produtoId);
@@ -1104,7 +1154,7 @@ function FinanceiroTable({ items, update, remove }) {
 }
 function FinanceiroTemplatesSection({ templatesCollection, financeiroCollection }) {
     const [subCategoria, setSubCategoria] = useState('Fixa');
-    const handleExportTemplates = () => {
+    const handleExportTemplates = async () => {
         const rowsFixas = templatesCollection.items.map((i) => ({
             'Nome': i.nome,
             'Tipo': i.tipo,
@@ -1124,6 +1174,7 @@ function FinanceiroTemplatesSection({ templatesCollection, financeiroCollection 
         XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsFixas, { widths: { 'Nome': 28, 'Tipo': 12, 'Valor padrão (R$)': 16, 'Dia do vencimento': 16 }, currencyCols: ['Valor padrão (R$)'] }), 'Fixas');
         XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsVariaveis, { widths: { 'Descrição': 28, 'Tipo': 12, 'Valor (R$)': 14, 'Vencimento': 14, 'Status': 12 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] }), 'Variáveis');
         XLSX.writeFile(wb, 'distrisol-contas-fixas-variaveis.xlsx');
+        await registrarUltimoBackup();
     };
     const variaveisFiltradas = financeiroCollection.items.filter((i) => i.categoria === 'Variável');
     const variaveisCollection = {
@@ -1161,6 +1212,18 @@ function FinanceiroTab({ collection }) {
     const [viewMode, setViewMode] = useState('cards');
     const [prazoValor, setPrazoValor] = useState(7);
     const [prazoUnidade, setPrazoUnidade] = useState('dias');
+    const [mostrarRelatorioFin, setMostrarRelatorioFin] = useState(false);
+    useEffect(() => {
+        if (!mostrarRelatorioFin)
+            return;
+        const handler = () => setMostrarRelatorioFin(false);
+        window.addEventListener('afterprint', handler);
+        const t = setTimeout(() => window.print(), 50);
+        return () => {
+            clearTimeout(t);
+            window.removeEventListener('afterprint', handler);
+        };
+    }, [mostrarRelatorioFin]);
     const templates = useCollection('distrisol:financeiro-templates');
     useEffect(() => {
         // One-time cleanup: templates used to support a 'Variável' category
@@ -1218,7 +1281,7 @@ function FinanceiroTab({ collection }) {
         setModalOpen(false);
         setEditing(null);
     };
-    const handleExport = () => {
+    const handleExport = async () => {
         const buildRows = (list) => [...list]
             .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
             .map((i) => ({
@@ -1233,6 +1296,7 @@ function FinanceiroTab({ collection }) {
         XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRows(pagar), opts), 'A Pagar');
         XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRows(receber), opts), 'A Receber');
         XLSX.writeFile(wb, 'distrisol-contas.xlsx');
+        await registrarUltimoBackup();
     };
     const badgeFor = (item) => {
         if (item.status === 'Concluído') {
@@ -1258,6 +1322,7 @@ function FinanceiroTab({ collection }) {
                 React.createElement("div", { className: "flex gap-2" },
                     React.createElement("button", { onClick: () => setImportModalOpen(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Importar planilha"),
                     React.createElement("button", { onClick: handleExport, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar Excel"),
+                    React.createElement("button", { onClick: () => setMostrarRelatorioFin(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Relat\u00F3rio PDF"),
                     React.createElement("button", { onClick: () => { setEditing(null); setModalOpen(true); }, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } },
                         React.createElement(Plus, { size: 14 }),
                         " Nova conta"))),
@@ -1295,7 +1360,17 @@ function FinanceiroTab({ collection }) {
                 renderList(pagar, 'Contas a pagar · Fornecedores'),
                 renderList(receber, 'Contas a receber · Clientes'))),
             modalOpen && (React.createElement(RecordModal, { title: editing ? 'Editar conta' : 'Nova conta', fields: FINANCEIRO_FIELDS, initial: editing, onClose: () => { setModalOpen(false); setEditing(null); }, onSave: handleSave })),
-            importModalOpen && (React.createElement(ImportFinanceiroModal, { collection: collection, onClose: () => setImportModalOpen(false) })))));
+            importModalOpen && (React.createElement(ImportFinanceiroModal, { collection: collection, onClose: () => setImportModalOpen(false) })),
+            mostrarRelatorioFin && React.createElement(PrintableReport, { title: "Relat\u00F3rio Financeiro \u2014 Distrisol", subtitle: `Gerado em ${formatDate(new Date().toISOString().slice(0, 10))}`, sections: [
+                    { heading: 'Resumo', rows: [
+                            ['Saldo previsto', formatBRL(totalReceberPendente - totalPagarPendente)],
+                            ['A pagar (pendente)', formatBRL(totalPagarPendente)],
+                            ['A receber (pendente)', formatBRL(totalReceberPendente)],
+                        ] },
+                    { heading: 'Contas em atraso', rows: [...pagar, ...receber].filter((i) => i.status !== 'Concluído' && diasParaVencer(i.vencimento) < 0).sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento)).map((i) => [i.tipo, i.descricao, formatBRL(i.valor), formatDate(i.vencimento)]), empty: 'Nenhuma conta em atraso.' },
+                    { heading: 'A pagar (pendente)', rows: pagar.filter((i) => i.status !== 'Concluído').sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento)).map((i) => [i.descricao, formatBRL(i.valor), formatDate(i.vencimento)]), empty: 'Nenhuma conta a pagar pendente.' },
+                    { heading: 'A receber (pendente)', rows: receber.filter((i) => i.status !== 'Concluído').sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento)).map((i) => [i.descricao, formatBRL(i.valor), formatDate(i.vencimento)]), empty: 'Nenhuma conta a receber pendente.' },
+                ] }))));
 }
 const VENDAS_MODALIDADES = [
     {
@@ -1337,10 +1412,139 @@ const VENDAS_MODALIDADES = [
                 : { text: 'Processando', bg: 'var(--paper-alt)', color: 'var(--text-muted)' },
     },
 ];
+function ImportVendasModal({ collection, fields, modalidadeLabel, onClose }) {
+    const [status, setStatus] = useState('idle'); // idle | parsing | preview | importing | done | error
+    const [preview, setPreview] = useState([]);
+    const [error, setError] = useState(null);
+    const [fileName, setFileName] = useState('');
+    const [skippedCount, setSkippedCount] = useState(0);
+    const requiredKey = fields[0].key;
+    const getFlexible = (row, field) => {
+        const candidates = [field.label, field.key];
+        for (const c of candidates) {
+            if (row[c] !== undefined && String(row[c]).trim() !== '')
+                return row[c];
+            const foundKey = Object.keys(row).find((k) => k.toLowerCase() === c.toLowerCase());
+            if (foundKey && String(row[foundKey]).trim() !== '')
+                return row[foundKey];
+        }
+        return '';
+    };
+    const handleFile = (e) => {
+        const file = e.target.files[0];
+        if (!file)
+            return;
+        setFileName(file.name);
+        setStatus('parsing');
+        setError(null);
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            try {
+                const data = new Uint8Array(evt.target.result);
+                const wb = XLSX.read(data, { type: 'array', cellDates: true });
+                const sheetName = wb.SheetNames[0];
+                const ws = wb.Sheets[sheetName];
+                const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+                const allMapped = rows.map((r) => {
+                    const record = {};
+                    fields.forEach((f) => {
+                        const raw = getFlexible(r, f);
+                        if (f.type === 'date') {
+                            record[f.key] = raw ? excelDateToISO(raw) : '';
+                        }
+                        else if (f.type === 'number') {
+                            record[f.key] = Number(raw) || 0;
+                        }
+                        else {
+                            record[f.key] = String(raw || '').trim();
+                        }
+                    });
+                    return record;
+                });
+                const mapped = allMapped.filter((r) => r[requiredKey]);
+                setSkippedCount(allMapped.length - mapped.length);
+                if (mapped.length === 0) {
+                    setError(`Não encontrei linhas com "${fields[0].label}" preenchido. Confira as colunas do arquivo.`);
+                    setStatus('error');
+                }
+                else {
+                    setPreview(mapped);
+                    setStatus('preview');
+                }
+            }
+            catch (err) {
+                setError('Não consegui ler esse arquivo. Confira se é um .xlsx válido.');
+                setStatus('error');
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    };
+    const handleImport = async () => {
+        setStatus('importing');
+        for (const record of preview) {
+            await collection.add(record);
+        }
+        setStatus('done');
+    };
+    return (React.createElement("div", { className: "fixed inset-0 z-50 flex items-center justify-center", style: { background: 'rgba(20,33,61,0.45)', zIndex: 100, padding: '16px' }, onClick: onClose },
+        React.createElement("div", { className: "w-full md:max-w-md rounded-2xl overflow-y-auto", style: {
+                background: 'var(--paper)', maxHeight: '85vh',
+                padding: '20px',
+                paddingLeft: 'max(20px, env(safe-area-inset-left))',
+                paddingRight: 'max(20px, env(safe-area-inset-right))',
+                paddingBottom: 'max(20px, env(safe-area-inset-bottom))',
+            }, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { className: "flex items-center justify-between mb-4" },
+                React.createElement("h3", { className: "font-semibold text-lg", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } },
+                    "Importar ",
+                    modalidadeLabel),
+                React.createElement("button", { onClick: onClose, className: "p-1 rounded-full" },
+                    React.createElement(X, { size: 20, color: "var(--navy)" }))),
+            status === 'idle' && (React.createElement("div", null,
+                React.createElement("p", { className: "text-xs mb-3", style: { color: 'var(--text-muted)' } },
+                    "Selecione o arquivo .xlsx. Procuro pelas colunas: ",
+                    fields.map((f) => f.label).join(', '),
+                    "."),
+                React.createElement("input", { type: "file", id: "import-vendas-file", accept: ".xlsx,.xls,.csv", onChange: handleFile, style: { display: 'none' } }),
+                React.createElement("label", { htmlFor: "import-vendas-file", className: "flex items-center justify-center w-full rounded-lg py-3 font-medium text-sm", style: { background: 'var(--navy)', color: 'var(--teal-soft)', cursor: 'pointer' } }, "Escolher arquivo"))),
+            status === 'parsing' && React.createElement("p", { className: "text-sm", style: { color: 'var(--text-muted)' } },
+                "Lendo ",
+                fileName,
+                "..."),
+            status === 'error' && (React.createElement("div", null,
+                React.createElement("p", { className: "text-sm mb-3", style: { color: 'var(--red)' } }, error),
+                React.createElement("button", { onClick: () => setStatus('idle'), className: "text-xs font-medium", style: { color: 'var(--navy)' } }, "Tentar outro arquivo"))),
+            status === 'preview' && (React.createElement("div", null,
+                React.createElement("p", { className: "text-sm mb-1", style: { color: 'var(--navy)' } },
+                    "Encontrei ",
+                    React.createElement("strong", null, preview.length),
+                    " registro(s) prontos para importar."),
+                skippedCount > 0 && (React.createElement("p", { className: "text-xs mb-3", style: { color: '#9C6B1A' } },
+                    skippedCount,
+                    " linha(s) ignorada(s) por falta do campo obrigat\u00F3rio.")),
+                React.createElement("div", { className: "space-y-1 mb-4", style: { maxHeight: '240px', overflowY: 'auto' } },
+                    preview.slice(0, 8).map((r, i) => (React.createElement("div", { key: i, className: "text-xs rounded-lg px-3 py-2", style: { background: 'var(--paper-alt)', color: 'var(--text-muted)' } }, fields.map((f) => r[f.key]).filter(Boolean).join(' · ')))),
+                    preview.length > 8 && (React.createElement("p", { className: "text-xs text-center", style: { color: 'var(--text-muted)' } },
+                        "+ ",
+                        preview.length - 8,
+                        " outros..."))),
+                React.createElement("button", { onClick: handleImport, className: "w-full rounded-lg py-2.5 font-medium text-sm", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } },
+                    "Importar ",
+                    preview.length,
+                    " registro(s)"))),
+            status === 'importing' && React.createElement("p", { className: "text-sm", style: { color: 'var(--text-muted)' } }, "Importando..."),
+            status === 'done' && (React.createElement("div", { className: "text-center py-4" },
+                React.createElement("p", { className: "text-sm font-medium mb-3", style: { color: 'var(--green)' } },
+                    "Pronto! ",
+                    preview.length,
+                    " registro(s) importado(s)."),
+                React.createElement("button", { onClick: onClose, className: "rounded-lg px-5 py-2 text-sm font-medium", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } }, "Fechar"))))));
+}
 function VendasTab({ collections }) {
     const [sub, setSub] = useState('licitacoes');
     const modConfig = VENDAS_MODALIDADES.find((m) => m.key === sub);
-    const handleExport = () => {
+    const [importModalOpen, setImportModalOpen] = useState(false);
+    const handleExport = async () => {
         const wb = XLSX.utils.book_new();
         VENDAS_MODALIDADES.forEach((m) => {
             const widths = {};
@@ -1364,12 +1568,15 @@ function VendasTab({ collections }) {
             XLSX.utils.book_append_sheet(wb, buildStyledSheet(rows, { widths, currencyCols, dateCols }), m.label.slice(0, 31));
         });
         XLSX.writeFile(wb, 'distrisol-vendas.xlsx');
+        await registrarUltimoBackup();
     };
     return (React.createElement(TabWatermark, null,
         React.createElement("div", null,
-            React.createElement("div", { className: "flex items-center justify-between mb-3" },
+            React.createElement("div", { className: "flex items-center justify-between mb-3 gap-2" },
                 React.createElement("h2", { className: "font-semibold text-base", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, "Vendas"),
-                React.createElement("button", { onClick: handleExport, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar Excel")),
+                React.createElement("div", { className: "flex gap-2" },
+                    React.createElement("button", { onClick: () => setImportModalOpen(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Importar"),
+                    React.createElement("button", { onClick: handleExport, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar Excel"))),
             React.createElement("div", { className: "flex gap-2 overflow-x-auto pb-1 mb-4 -mx-1 px-1" }, VENDAS_MODALIDADES.map((m) => {
                 const Icon = m.icon;
                 const active = sub === m.key;
@@ -1378,7 +1585,12 @@ function VendasTab({ collections }) {
                     " ",
                     m.label));
             })),
-            React.createElement(EntitySection, { collection: collections[sub], fields: modConfig.fields, title: "", addLabel: `Novo`, emptyLabel: `Nenhum registro em ${modConfig.label} ainda.`, getPrimary: modConfig.getPrimary, getSecondary: modConfig.getSecondary, getBadge: modConfig.getBadge }))));
+            React.createElement("p", { className: "text-xs mb-3", style: { color: 'var(--text-muted)' } },
+                "O bot\u00E3o \"Importar\" traz dados para a modalidade selecionada acima (",
+                modConfig.label,
+                ")."),
+            React.createElement(EntitySection, { collection: collections[sub], fields: modConfig.fields, title: "", addLabel: `Novo`, emptyLabel: `Nenhum registro em ${modConfig.label} ainda.`, getPrimary: modConfig.getPrimary, getSecondary: modConfig.getSecondary, getBadge: modConfig.getBadge }),
+            importModalOpen && (React.createElement(ImportVendasModal, { collection: collections[sub], fields: modConfig.fields, modalidadeLabel: modConfig.label, onClose: () => setImportModalOpen(false) })))));
 }
 function AgendaTab({ collection, financeiro }) {
     const { items, loading, error, add, update, remove } = collection;
@@ -1392,7 +1604,7 @@ function AgendaTab({ collection, financeiro }) {
         setModalOpen(false);
         setEditing(null);
     };
-    const handleExport = () => {
+    const handleExport = async () => {
         const rows = [...items]
             .sort((a, b) => new Date(a.data) - new Date(b.data))
             .map((i) => ({
@@ -1405,6 +1617,7 @@ function AgendaTab({ collection, financeiro }) {
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Agenda');
         XLSX.writeFile(wb, 'distrisol-agenda.xlsx');
+        await registrarUltimoBackup();
     };
     const alertasFinanceiros = useMemo(() => {
         return financeiro.items
@@ -1627,7 +1840,7 @@ function DocumentosTab({ collection }) {
         }
         return data;
     };
-    const handleExport = () => {
+    const handleExport = async () => {
         const rows = [...collection.items]
             .sort((a, b) => a.nome.localeCompare(b.nome))
             .map((i) => ({
@@ -1642,6 +1855,7 @@ function DocumentosTab({ collection }) {
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Documentos');
         XLSX.writeFile(wb, 'distrisol-documentos.xlsx');
+        await registrarUltimoBackup();
     };
     return (React.createElement(TabWatermark, null,
         React.createElement("div", { className: "mb-3" },
@@ -1710,12 +1924,13 @@ function EmpresaTab({ storageKey }) {
         setModalOpen(false);
     };
     const hasAnyData = EMPRESA_FIELDS.some((f) => data[f.key]);
-    const handleExport = () => {
+    const handleExport = async () => {
         const rows = EMPRESA_FIELDS.map((f) => ({ 'Campo': f.label, 'Valor': data[f.key] || '' }));
         const ws = buildStyledSheet(rows, { widths: { 'Campo': 22, 'Valor': 40 } });
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Empresa');
         XLSX.writeFile(wb, 'distrisol-empresa.xlsx');
+        await registrarUltimoBackup();
     };
     return (React.createElement(TabWatermark, null,
         React.createElement("div", { className: "flex items-center justify-between mb-3 gap-2" },
@@ -1732,7 +1947,24 @@ function EmpresaTab({ storageKey }) {
         modalOpen && (React.createElement(RecordModal, { title: "Dados da empresa", fields: EMPRESA_FIELDS, initial: data, onClose: () => setModalOpen(false), onSave: handleSave }))));
 }
 function DashboardTab({ estoque, financeiro, licitacoes, cotacoes, acordos, marketplace }) {
+    const lotes = useCollection('distrisol:estoque-lotes');
+    const agenda = useCollection('distrisol:agenda');
+    const documentos = useCollection('distrisol:documentos');
     const [oculto, setOculto] = useState(false);
+    const [ultimoBackup, setUltimoBackup] = useState(null);
+    const [exportandoTudo, setExportandoTudo] = useState(false);
+    const [mostrarRelatorio, setMostrarRelatorio] = useState(false);
+    useEffect(() => {
+        if (!mostrarRelatorio)
+            return;
+        const handler = () => setMostrarRelatorio(false);
+        window.addEventListener('afterprint', handler);
+        const t = setTimeout(() => window.print(), 50);
+        return () => {
+            clearTimeout(t);
+            window.removeEventListener('afterprint', handler);
+        };
+    }, [mostrarRelatorio]);
     useEffect(() => {
         let mounted = true;
         (async () => {
@@ -1743,6 +1975,14 @@ function DashboardTab({ estoque, financeiro, licitacoes, cotacoes, acordos, mark
             }
             catch (e) {
                 // sem preferência salva ainda — mantém visível por padrão
+            }
+            try {
+                const res2 = await storage.get('distrisol:ultimo-backup');
+                if (mounted && res2)
+                    setUltimoBackup(res2.value);
+            }
+            catch (e) {
+                // nunca fez backup ainda — tudo bem
             }
         })();
         return () => { mounted = false; };
@@ -1755,6 +1995,102 @@ function DashboardTab({ estoque, financeiro, licitacoes, cotacoes, acordos, mark
         }
         catch (e) {
             // segue funcionando nesta sessão mesmo se não conseguir salvar a preferência
+        }
+    };
+    const backupTexto = () => {
+        if (!ultimoBackup)
+            return 'Nenhum backup feito ainda';
+        const dias = diasDesde(ultimoBackup);
+        if (dias === null)
+            return 'Nenhum backup feito ainda';
+        if (dias === 0)
+            return 'Último backup: hoje';
+        if (dias === 1)
+            return 'Último backup: há 1 dia';
+        return `Último backup: há ${dias} dias`;
+    };
+    const handleExportAll = async () => {
+        setExportandoTudo(true);
+        try {
+            const wb = XLSX.utils.book_new();
+            const rowsEstoque = [...estoque.items]
+                .sort((a, b) => a.nome.localeCompare(b.nome))
+                .map((i) => ({
+                    'Produto': i.nome,
+                    'Categoria': i.categoria || '',
+                    'Quantidade': Number(i.quantidade) || 0,
+                    'Unidade': i.unidade || 'un',
+                    'Estoque mínimo': Number(i.estoqueMinimo) || 0,
+                    'Preço unitário (R$)': Number(i.precoUnit) || 0,
+                }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsEstoque, { widths: { 'Produto': 28, 'Categoria': 18, 'Quantidade': 12, 'Unidade': 10, 'Estoque mínimo': 14, 'Preço unitário (R$)': 16 }, currencyCols: ['Preço unitário (R$)'] }), 'Estoque');
+            const rowsLotes = [...lotes.items]
+                .filter((l) => Number(l.quantidade) > 0)
+                .map((l) => ({
+                'Produto': l.produtoNome,
+                'Lote': l.lote || '',
+                'Validade': l.validade ? new Date(l.validade + 'T00:00:00') : '',
+                'Quantidade': l.quantidade,
+            }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsLotes, { widths: { 'Produto': 28, 'Lote': 14, 'Validade': 14, 'Quantidade': 12 }, dateCols: ['Validade'] }), 'Lotes');
+            VENDAS_MODALIDADES.forEach((m) => {
+                const colecao = { licitacoes, cotacoes, acordos, marketplace }[m.key];
+                const widths = {};
+                const currencyCols = [];
+                const dateCols = [];
+                m.fields.forEach((f) => {
+                    widths[f.label] = f.type === 'text' ? 26 : 16;
+                    if (f.type === 'number')
+                        currencyCols.push(f.label);
+                    if (f.type === 'date')
+                        dateCols.push(f.label);
+                });
+                const rows = colecao.items.map((i) => {
+                    const row = {};
+                    m.fields.forEach((f) => {
+                        const v = i[f.key];
+                        row[f.label] = f.type === 'date' ? (v ? new Date(v + 'T00:00:00') : '') : f.type === 'number' ? (Number(v) || 0) : (v ?? '');
+                    });
+                    return row;
+                });
+                XLSX.utils.book_append_sheet(wb, buildStyledSheet(rows, { widths, currencyCols, dateCols }), m.label.slice(0, 31));
+            });
+            const rowsAgenda = [...agenda.items]
+                .sort((a, b) => new Date(a.data) - new Date(b.data))
+                .map((i) => ({
+                    'Compromisso': i.titulo,
+                    'Data': i.data ? new Date(i.data + 'T00:00:00') : '',
+                    'Hora': i.hora || '',
+                    'Notas': i.notas || '',
+                }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsAgenda, { widths: { 'Compromisso': 30, 'Data': 14, 'Hora': 10, 'Notas': 34 }, dateCols: ['Data'] }), 'Agenda');
+            const rowsDocumentos = [...documentos.items]
+                .sort((a, b) => a.nome.localeCompare(b.nome))
+                .map((i) => ({
+                    'Nome do documento': i.nome,
+                    'Tipo': i.tipo || '',
+                    'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+                    'Link': i.link || '',
+                    'Grupo': i.grupo || '',
+                    'Notas': i.notas || '',
+                }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsDocumentos, { widths: { 'Nome do documento': 30, 'Tipo': 16, 'Vencimento': 14, 'Link': 40, 'Grupo': 22, 'Notas': 30 }, dateCols: ['Vencimento'] }), 'Documentos');
+            let empresaData = {};
+            try {
+                const res = await storage.get('distrisol:empresa');
+                empresaData = res ? JSON.parse(res.value) : {};
+            }
+            catch (e) {
+                empresaData = {};
+            }
+            const rowsEmpresa = EMPRESA_FIELDS.map((f) => ({ 'Campo': f.label, 'Valor': empresaData[f.key] || '' }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsEmpresa, { widths: { 'Campo': 22, 'Valor': 40 } }), 'Empresa');
+            XLSX.writeFile(wb, 'distrisol-backup-completo.xlsx');
+            await registrarUltimoBackup();
+            setUltimoBackup(new Date().toISOString());
+        }
+        finally {
+            setExportandoTudo(false);
         }
     };
     const mostrarValor = (v) => (oculto ? '••••••' : formatBRL(v));
@@ -1789,6 +2125,10 @@ function DashboardTab({ estoque, financeiro, licitacoes, cotacoes, acordos, mark
             React.createElement("p", { className: "text-xs mb-3", style: { color: 'var(--text-muted)' } },
                 "Resumo do neg\u00F3cio hoje, ",
                 formatDate(new Date().toISOString().slice(0, 10))),
+            React.createElement("div", { className: "flex items-center gap-2 flex-wrap mb-3" },
+                React.createElement("button", { onClick: handleExportAll, disabled: exportandoTudo, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)', opacity: exportandoTudo ? 0.6 : 1 } }, exportandoTudo ? 'Exportando...' : 'Exportar tudo'),
+                React.createElement("button", { onClick: () => setMostrarRelatorio(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Relat\u00F3rio PDF"),
+                React.createElement("span", { className: "text-xs", style: { color: 'var(--text-muted)' } }, backupTexto())),
             React.createElement("a", { href: "https://distrisol.com.br", target: "_blank", rel: "noopener noreferrer", className: "inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full mb-4", style: { background: 'white', color: 'var(--navy)', border: '1px solid var(--line)' } },
                 React.createElement(ExternalLink, { size: 13, color: "var(--teal)" }),
                 " distrisol.com.br"),
@@ -1836,7 +2176,13 @@ function DashboardTab({ estoque, financeiro, licitacoes, cotacoes, acordos, mark
                             " \u00B7 ",
                             formatDate(item.vencimento))),
                     React.createElement("span", { className: "text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ml-2", style: { background: tone.bg, color: tone.color } }, mostrarValor(item.valor))));
-            }))))));
+            }))),
+            mostrarRelatorio && React.createElement(PrintableReport, { title: "Relat\u00F3rio Geral \u2014 Distrisol", subtitle: `Gerado em ${formatDate(new Date().toISOString().slice(0, 10))}`, sections: [
+                    { heading: 'Estoque com nível baixo', rows: estoqueBaixo.map((i) => [i.nome, `${i.quantidade} ${i.unidade || 'un'}`, `mínimo: ${i.estoqueMinimo || 0}`]), empty: 'Nenhum item com estoque baixo.' },
+                    { heading: 'Vendas por modalidade', rows: modalidades.map((m) => [m.label, `${m.items.length} registro(s)`]) },
+                    { heading: 'Documentos vencendo em 30 dias', rows: documentos.items.filter((d) => d.vencimento && diasParaVencer(d.vencimento) <= 30).map((d) => [d.nome, formatDate(d.vencimento)]), empty: 'Nenhum documento vencendo em breve.' },
+                    { heading: 'Próximos compromissos', rows: [...agenda.items].sort((a, b) => new Date(a.data) - new Date(b.data)).slice(0, 10).map((a) => [a.titulo, formatDate(a.data), a.hora || '']), empty: 'Nenhum compromisso agendado.' },
+                ] }))));
 }
 function Logo({ small }) {
     return (React.createElement("img", { src: LOGO_FULL, alt: "Distrisol", style: { height: small ? 47 : 68, width: 'auto', display: 'block' } }));
@@ -1857,8 +2203,55 @@ function ShoppingBagFallback(props) {
         React.createElement("path", { d: "M3 6h18" }),
         React.createElement("path", { d: "M16 10a4 4 0 0 1-8 0" })));
 }
+function GlobalSearchModal({ estoque, vendasCollections, agenda, documentos, onNavigate, onClose }) {
+    const [query, setQuery] = useState('');
+    const q = query.trim().toLowerCase();
+    const matches = (text) => !!text && String(text).toLowerCase().includes(q);
+    const resultados = [];
+    if (q) {
+        estoque.items.forEach((i) => {
+            if (matches(i.nome) || matches(i.categoria))
+                resultados.push({ tab: 'estoque', label: i.nome, sub: 'Estoque' });
+        });
+        VENDAS_MODALIDADES.forEach((m) => {
+            (vendasCollections[m.key].items || []).forEach((i) => {
+                const primary = m.getPrimary(i);
+                const secundarios = m.getSecondary(i) || [];
+                if (matches(primary) || secundarios.some((s) => matches(s))) {
+                    resultados.push({ tab: 'vendas', label: primary || '(sem nome)', sub: m.label });
+                }
+            });
+        });
+        documentos.items.forEach((i) => {
+            if (matches(i.nome) || matches(i.tipo) || matches(i.grupo))
+                resultados.push({ tab: 'documentos', label: i.nome, sub: 'Documentos' });
+        });
+        agenda.items.forEach((i) => {
+            if (matches(i.titulo) || matches(i.notas))
+                resultados.push({ tab: 'agenda', label: i.titulo, sub: 'Agenda' });
+        });
+    }
+    return (React.createElement("div", { className: "fixed inset-0 z-50 flex flex-col", style: { background: 'var(--paper)', zIndex: 200 } },
+        React.createElement("div", { className: "flex items-center gap-2 shrink-0", style: {
+                padding: '16px 20px',
+                paddingTop: 'max(16px, env(safe-area-inset-top))',
+                paddingLeft: 'max(20px, env(safe-area-inset-left))',
+                paddingRight: 'max(20px, env(safe-area-inset-right))',
+                borderBottom: '1px solid var(--line)',
+                background: 'white',
+            } },
+            React.createElement(Search, { size: 18, color: "var(--text-muted)" }),
+            React.createElement("input", { autoFocus: true, type: "text", value: query, onChange: (e) => setQuery(e.target.value), placeholder: "Buscar produto, cliente, documento, compromisso...", className: "flex-1 text-sm", style: { border: 'none', outline: 'none', background: 'transparent', color: 'var(--text)' } }),
+            React.createElement("button", { onClick: onClose, className: "p-1 rounded-full shrink-0" },
+                React.createElement(X, { size: 20, color: "var(--navy)" }))),
+        React.createElement("div", { className: "flex-1 overflow-y-auto", style: { padding: '12px 20px' } },
+            !q ? (React.createElement("p", { className: "text-xs mt-4 text-center", style: { color: 'var(--text-muted)' } }, "Busca em Estoque, Vendas, Documentos e Agenda. (Financeiro fica de fora daqui — acesse pela senha.)")) : resultados.length === 0 ? (React.createElement("p", { className: "text-xs mt-4 text-center", style: { color: 'var(--text-muted)' } }, "Nada encontrado.")) : (React.createElement("div", { className: "space-y-2" }, resultados.map((r, i) => (React.createElement("button", { key: i, onClick: () => { onNavigate(r.tab); onClose(); }, className: "w-full text-left rounded-xl p-3.5", style: { background: 'white', border: '1px solid var(--line)' } },
+            React.createElement("p", { className: "text-sm font-medium", style: { color: 'var(--navy)' } }, r.label || '(sem nome)'),
+            React.createElement("p", { className: "text-xs mt-0.5", style: { color: 'var(--text-muted)' } }, r.sub)))))))));
+}
 function App() {
     const [tab, setTab] = useState('dashboard');
+    const [searchOpen, setSearchOpen] = useState(false);
     const estoque = useCollection('distrisol:estoque');
     const financeiro = useCollection('distrisol:financeiro');
     const licitacoes = useCollection('distrisol:vendas-licitacoes');
@@ -1903,7 +2296,10 @@ function App() {
                 paddingLeft: 'max(20px, env(safe-area-inset-left))',
             } },
             React.createElement(Logo, null),
-            React.createElement("nav", { className: "mt-8 flex flex-col gap-1" }, TABS.map((t) => {
+            React.createElement("button", { onClick: () => setSearchOpen(true), className: "flex items-center gap-2 mt-6 px-3 py-2 rounded-lg text-sm w-full text-left", style: { background: 'var(--paper-alt)', color: 'var(--text-muted)' } },
+                React.createElement(Search, { size: 15 }),
+                " Buscar..."),
+            React.createElement("nav", { className: "mt-4 flex flex-col gap-1" }, TABS.map((t) => {
                 const Icon = t.icon;
                 const active = tab === t.key;
                 return (React.createElement("button", { key: t.key, onClick: () => setTab(t.key), className: "flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-left", style: { background: active ? 'var(--green-soft)' : 'transparent', color: active ? 'var(--navy)' : 'var(--text-muted)' } },
@@ -1914,14 +2310,16 @@ function App() {
                     t.key === 'financeiro' && React.createElement(Lock, { size: 11, style: { opacity: 0.6 } })));
             }))),
         React.createElement("div", { className: "flex-1 flex flex-col min-w-0 md:pb-0", style: { paddingBottom: 'calc(80px + env(safe-area-inset-bottom))' } },
-            React.createElement("header", { className: "md:hidden", style: {
+            React.createElement("header", { className: "md:hidden flex items-center justify-between", style: {
                     background: 'white', borderBottom: '1px solid var(--line)',
                     padding: '16px 20px',
                     paddingTop: 'max(16px, env(safe-area-inset-top))',
                     paddingLeft: 'max(20px, env(safe-area-inset-left))',
                     paddingRight: 'max(20px, env(safe-area-inset-right))',
                 } },
-                React.createElement(Logo, { small: true })),
+                React.createElement(Logo, { small: true }),
+                React.createElement("button", { onClick: () => setSearchOpen(true), className: "p-2 rounded-full", style: { background: 'var(--paper-alt)' } },
+                    React.createElement(Search, { size: 17, color: "var(--navy)" }))),
             React.createElement("main", { className: "flex-1 max-w-3xl w-full mx-auto", style: {
                     padding: '20px 16px',
                     paddingLeft: 'max(16px, env(safe-area-inset-left))',
@@ -1946,7 +2344,8 @@ function App() {
                     React.createElement(Icon, { size: 18, color: active ? 'var(--teal)' : '#7C86A8' }),
                     t.key === 'financeiro' && (React.createElement(Lock, { size: 9, color: active ? 'var(--teal)' : '#7C86A8', style: { position: 'absolute', top: -4, right: -6 } }))),
                 React.createElement("span", { className: "font-medium", style: { color: active ? 'var(--teal-soft)' : '#7C86A8', fontSize: '10px' } }, t.label.split(' ')[0])));
-        }))));
+        })),
+        searchOpen && React.createElement(GlobalSearchModal, { estoque: estoque, vendasCollections: vendasCollections, agenda: agenda, documentos: documentos, onNavigate: setTab, onClose: () => setSearchOpen(false) })));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
 
