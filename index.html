@@ -1260,6 +1260,214 @@ function FinanceiroTab({ collection }) {
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [templates.loading, loading, templates.items]);
+    const estoqueCompleto = useCollection('distrisol:estoque');
+    const lotesCompleto = useCollection('distrisol:estoque-lotes');
+    const licitacoesCompleto = useCollection('distrisol:vendas-licitacoes');
+    const cotacoesCompleto = useCollection('distrisol:vendas-cotacoes');
+    const acordosCompleto = useCollection('distrisol:vendas-acordos');
+    const marketplaceCompleto = useCollection('distrisol:vendas-marketplace');
+    const agendaCompleto = useCollection('distrisol:agenda');
+    const documentosCompleto = useCollection('distrisol:documentos');
+    const [exportandoCompleto, setExportandoCompleto] = useState(false);
+    const handleExportCompleto = async () => {
+        setExportandoCompleto(true);
+        try {
+            const wb = XLSX.utils.book_new();
+            // Financeiro primeiro, já que estamos dentro da área com senha
+            const buildRowsContas = (list) => [...list]
+                .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
+                .map((i) => ({
+                    'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+                    'Descrição': i.descricao,
+                    'Valor (R$)': Number(i.valor) || 0,
+                    'Status': i.status,
+                    'Observação': i.obs || '',
+                }));
+            const optsContas = { widths: { 'Vencimento': 14, 'Descrição': 34, 'Valor (R$)': 14, 'Status': 12, 'Observação': 26 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] };
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRowsContas(pagar), optsContas), 'A Pagar');
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRowsContas(receber), optsContas), 'A Receber');
+            const rowsFixas = templates.items.map((i) => ({
+                'Nome': i.nome,
+                'Tipo': i.tipo,
+                'Valor padrão (R$)': Number(i.valorPadrao) || 0,
+                'Dia do vencimento': i.diaVencimento,
+            }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsFixas, { widths: { 'Nome': 28, 'Tipo': 12, 'Valor padrão (R$)': 16, 'Dia do vencimento': 16 }, currencyCols: ['Valor padrão (R$)'] }), 'Fixas');
+            const rowsVariaveis = items
+                .filter((i) => i.categoria === 'Variável')
+                .map((i) => ({
+                'Descrição': i.descricao,
+                'Tipo': i.tipo,
+                'Valor (R$)': Number(i.valor) || 0,
+                'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+                'Status': i.status,
+            }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsVariaveis, { widths: { 'Descrição': 28, 'Tipo': 12, 'Valor (R$)': 14, 'Vencimento': 14, 'Status': 12 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] }), 'Variáveis');
+            // Resto do app
+            const rowsEstoque = [...estoqueCompleto.items]
+                .sort((a, b) => a.nome.localeCompare(b.nome))
+                .map((i) => ({
+                    'Produto': i.nome,
+                    'Categoria': i.categoria || '',
+                    'Quantidade': Number(i.quantidade) || 0,
+                    'Unidade': i.unidade || 'un',
+                    'Estoque mínimo': Number(i.estoqueMinimo) || 0,
+                    'Preço unitário (R$)': Number(i.precoUnit) || 0,
+                }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsEstoque, { widths: { 'Produto': 28, 'Categoria': 18, 'Quantidade': 12, 'Unidade': 10, 'Estoque mínimo': 14, 'Preço unitário (R$)': 16 }, currencyCols: ['Preço unitário (R$)'] }), 'Estoque');
+            const rowsLotes = [...lotesCompleto.items]
+                .filter((l) => Number(l.quantidade) > 0)
+                .map((l) => ({
+                'Produto': l.produtoNome,
+                'Lote': l.lote || '',
+                'Validade': l.validade ? new Date(l.validade + 'T00:00:00') : '',
+                'Quantidade': l.quantidade,
+            }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsLotes, { widths: { 'Produto': 28, 'Lote': 14, 'Validade': 14, 'Quantidade': 12 }, dateCols: ['Validade'] }), 'Lotes');
+            const colecoesVendas = { licitacoes: licitacoesCompleto, cotacoes: cotacoesCompleto, acordos: acordosCompleto, marketplace: marketplaceCompleto };
+            VENDAS_MODALIDADES.forEach((m) => {
+                const colecao = colecoesVendas[m.key];
+                const widths = {};
+                const currencyCols = [];
+                const dateCols = [];
+                m.fields.forEach((f) => {
+                    widths[f.label] = f.type === 'text' ? 26 : 16;
+                    if (f.type === 'number')
+                        currencyCols.push(f.label);
+                    if (f.type === 'date')
+                        dateCols.push(f.label);
+                });
+                const rows = colecao.items.map((i) => {
+                    const row = {};
+                    m.fields.forEach((f) => {
+                        const v = i[f.key];
+                        row[f.label] = f.type === 'date' ? (v ? new Date(v + 'T00:00:00') : '') : f.type === 'number' ? (Number(v) || 0) : (v ?? '');
+                    });
+                    return row;
+                });
+                XLSX.utils.book_append_sheet(wb, buildStyledSheet(rows, { widths, currencyCols, dateCols }), m.label.slice(0, 31));
+            });
+            const rowsAgenda = [...agendaCompleto.items]
+                .sort((a, b) => new Date(a.data) - new Date(b.data))
+                .map((i) => ({
+                    'Compromisso': i.titulo,
+                    'Data': i.data ? new Date(i.data + 'T00:00:00') : '',
+                    'Hora': i.hora || '',
+                    'Notas': i.notas || '',
+                }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsAgenda, { widths: { 'Compromisso': 30, 'Data': 14, 'Hora': 10, 'Notas': 34 }, dateCols: ['Data'] }), 'Agenda');
+            const rowsDocumentos = [...documentosCompleto.items]
+                .sort((a, b) => a.nome.localeCompare(b.nome))
+                .map((i) => ({
+                    'Nome do documento': i.nome,
+                    'Tipo': i.tipo || '',
+                    'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+                    'Link': i.link || '',
+                    'Grupo': i.grupo || '',
+                    'Notas': i.notas || '',
+                }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsDocumentos, { widths: { 'Nome do documento': 30, 'Tipo': 16, 'Vencimento': 14, 'Link': 40, 'Grupo': 22, 'Notas': 30 }, dateCols: ['Vencimento'] }), 'Documentos');
+            let empresaData = {};
+            try {
+                const res = await storage.get('distrisol:empresa');
+                empresaData = res ? JSON.parse(res.value) : {};
+            }
+            catch (e) {
+                empresaData = {};
+            }
+            const rowsEmpresa = EMPRESA_FIELDS.map((f) => ({ 'Campo': f.label, 'Valor': empresaData[f.key] || '' }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsEmpresa, { widths: { 'Campo': 22, 'Valor': 40 } }), 'Empresa');
+            XLSX.writeFile(wb, 'distrisol-backup-completo.xlsx');
+            await registrarUltimoBackup();
+        }
+        finally {
+            setExportandoCompleto(false);
+        }
+    };
+    const [exportandoEssencial, setExportandoEssencial] = useState(false);
+    const handleExportEssencial = async () => {
+        setExportandoEssencial(true);
+        try {
+            const wb = XLSX.utils.book_new();
+            const buildRowsContas = (list) => [...list]
+                .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
+                .map((i) => ({
+                    'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+                    'Descrição': i.descricao,
+                    'Valor (R$)': Number(i.valor) || 0,
+                    'Status': i.status,
+                    'Observação': i.obs || '',
+                }));
+            const optsContas = { widths: { 'Vencimento': 14, 'Descrição': 34, 'Valor (R$)': 14, 'Status': 12, 'Observação': 26 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] };
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRowsContas(pagar), optsContas), 'A Pagar');
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRowsContas(receber), optsContas), 'A Receber');
+            const rowsFixas = templates.items.map((i) => ({
+                'Nome': i.nome,
+                'Tipo': i.tipo,
+                'Valor padrão (R$)': Number(i.valorPadrao) || 0,
+                'Dia do vencimento': i.diaVencimento,
+            }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsFixas, { widths: { 'Nome': 28, 'Tipo': 12, 'Valor padrão (R$)': 16, 'Dia do vencimento': 16 }, currencyCols: ['Valor padrão (R$)'] }), 'Fixas');
+            const rowsVariaveis = items
+                .filter((i) => i.categoria === 'Variável')
+                .map((i) => ({
+                'Descrição': i.descricao,
+                'Tipo': i.tipo,
+                'Valor (R$)': Number(i.valor) || 0,
+                'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+                'Status': i.status,
+            }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsVariaveis, { widths: { 'Descrição': 28, 'Tipo': 12, 'Valor (R$)': 14, 'Vencimento': 14, 'Status': 12 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] }), 'Variáveis');
+            const rowsEstoque = [...estoqueCompleto.items]
+                .sort((a, b) => a.nome.localeCompare(b.nome))
+                .map((i) => ({
+                    'Produto': i.nome,
+                    'Categoria': i.categoria || '',
+                    'Quantidade': Number(i.quantidade) || 0,
+                    'Unidade': i.unidade || 'un',
+                    'Estoque mínimo': Number(i.estoqueMinimo) || 0,
+                    'Preço unitário (R$)': Number(i.precoUnit) || 0,
+                }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsEstoque, { widths: { 'Produto': 28, 'Categoria': 18, 'Quantidade': 12, 'Unidade': 10, 'Estoque mínimo': 14, 'Preço unitário (R$)': 16 }, currencyCols: ['Preço unitário (R$)'] }), 'Estoque');
+            const rowsLotes = [...lotesCompleto.items]
+                .filter((l) => Number(l.quantidade) > 0)
+                .map((l) => ({
+                'Produto': l.produtoNome,
+                'Lote': l.lote || '',
+                'Validade': l.validade ? new Date(l.validade + 'T00:00:00') : '',
+                'Quantidade': l.quantidade,
+            }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsLotes, { widths: { 'Produto': 28, 'Lote': 14, 'Validade': 14, 'Quantidade': 12 }, dateCols: ['Validade'] }), 'Lotes');
+            const colecoesVendas = { licitacoes: licitacoesCompleto, cotacoes: cotacoesCompleto, acordos: acordosCompleto, marketplace: marketplaceCompleto };
+            VENDAS_MODALIDADES.forEach((m) => {
+                const colecao = colecoesVendas[m.key];
+                const widths = {};
+                const currencyCols = [];
+                const dateCols = [];
+                m.fields.forEach((f) => {
+                    widths[f.label] = f.type === 'text' ? 26 : 16;
+                    if (f.type === 'number')
+                        currencyCols.push(f.label);
+                    if (f.type === 'date')
+                        dateCols.push(f.label);
+                });
+                const rows = colecao.items.map((i) => {
+                    const row = {};
+                    m.fields.forEach((f) => {
+                        const v = i[f.key];
+                        row[f.label] = f.type === 'date' ? (v ? new Date(v + 'T00:00:00') : '') : f.type === 'number' ? (Number(v) || 0) : (v ?? '');
+                    });
+                    return row;
+                });
+                XLSX.utils.book_append_sheet(wb, buildStyledSheet(rows, { widths, currencyCols, dateCols }), m.label.slice(0, 31));
+            });
+            XLSX.writeFile(wb, 'distrisol-backup-essencial.xlsx');
+            await registrarUltimoBackup();
+        }
+        finally {
+            setExportandoEssencial(false);
+        }
+    };
     const pagar = items.filter((i) => i.tipo === 'Pagar');
     const receber = items.filter((i) => i.tipo === 'Receber');
     const totalPagarPendente = pagar.filter((i) => i.status !== 'Concluído').reduce((s, i) => s + Number(i.valor || 0), 0);
@@ -1319,10 +1527,12 @@ function FinanceiroTab({ collection }) {
         React.createElement("div", null,
             React.createElement("div", { className: "flex items-center justify-between mb-3 gap-2" },
                 React.createElement("h2", { className: "font-semibold text-base", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, "Financeiro"),
-                React.createElement("div", { className: "flex gap-2" },
+                React.createElement("div", { className: "flex flex-wrap gap-2 justify-end" },
                     React.createElement("button", { onClick: () => setImportModalOpen(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Importar planilha"),
                     React.createElement("button", { onClick: handleExport, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar Excel"),
                     React.createElement("button", { onClick: () => setMostrarRelatorioFin(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Relat\u00F3rio PDF"),
+                    React.createElement("button", { onClick: handleExportEssencial, disabled: exportandoEssencial, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)', opacity: exportandoEssencial ? 0.6 : 1 } }, exportandoEssencial ? 'Exportando...' : 'Backup essencial'),
+                    React.createElement("button", { onClick: handleExportCompleto, disabled: exportandoCompleto, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)', opacity: exportandoCompleto ? 0.6 : 1 } }, exportandoCompleto ? 'Exportando...' : 'Backup completo (tudo)'),
                     React.createElement("button", { onClick: () => { setEditing(null); setModalOpen(true); }, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } },
                         React.createElement(Plus, { size: 14 }),
                         " Nova conta"))),
