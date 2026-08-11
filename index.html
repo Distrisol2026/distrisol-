@@ -387,6 +387,16 @@ const DOCUMENTOS_FIELDS = [
     { key: 'grupo', label: 'Grupo (ex: Cadastro Fornecedor XYZ)', type: 'text' },
     { key: 'notas', label: 'Notas', type: 'text' },
 ];
+const FORNECEDOR_FIELDS = [
+    { key: 'nome', label: 'Nome do fornecedor', type: 'text', required: true },
+    { key: 'categoria', label: 'Categoria / o que fornece', type: 'text' },
+    { key: 'contato', label: 'Contato (nome)', type: 'text' },
+    { key: 'telefone', label: 'Telefone', type: 'text' },
+    { key: 'email', label: 'E-mail', type: 'text' },
+    { key: 'site', label: 'Site', type: 'text' },
+    { key: 'catalogoLink', label: 'Link do catálogo principal', type: 'text' },
+    { key: 'notas', label: 'Notas', type: 'text' },
+];
 const TEMPLATE_FIELDS = [
     { key: 'nome', label: 'Nome (ex: Aluguel, Salários, Energia)', type: 'text', required: true },
     { key: 'tipo', label: 'Tipo', type: 'select', options: ['Pagar', 'Receber'], required: true },
@@ -1268,6 +1278,7 @@ function FinanceiroTab({ collection }) {
     const marketplaceCompleto = useCollection('distrisol:vendas-marketplace');
     const agendaCompleto = useCollection('distrisol:agenda');
     const documentosCompleto = useCollection('distrisol:documentos');
+    const fornecedoresCompleto = useCollection('distrisol:fornecedores');
     const [exportandoCompleto, setExportandoCompleto] = useState(false);
     const handleExportCompleto = async () => {
         setExportandoCompleto(true);
@@ -1367,6 +1378,19 @@ function FinanceiroTab({ collection }) {
                     'Notas': i.notas || '',
                 }));
             XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsDocumentos, { widths: { 'Nome do documento': 30, 'Tipo': 16, 'Vencimento': 14, 'Link': 40, 'Grupo': 22, 'Notas': 30 }, dateCols: ['Vencimento'] }), 'Documentos');
+            const rowsFornecedores = [...fornecedoresCompleto.items]
+                .sort((a, b) => a.nome.localeCompare(b.nome))
+                .map((f) => ({
+                    'Nome': f.nome,
+                    'Categoria': f.categoria || '',
+                    'Contato': f.contato || '',
+                    'Telefone': f.telefone || '',
+                    'E-mail': f.email || '',
+                    'Site': f.site || '',
+                    'Catálogo': f.catalogoLink || '',
+                    'Notas': f.notas || '',
+                }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsFornecedores, { widths: { 'Nome': 24, 'Categoria': 18, 'Contato': 18, 'Telefone': 14, 'E-mail': 22, 'Site': 26, 'Catálogo': 26, 'Notas': 26 } }), 'Fornecedores');
             let empresaData = {};
             try {
                 const res = await storage.get('distrisol:empresa');
@@ -1964,6 +1988,58 @@ function PinGate({ storageKey, children }) {
             error && React.createElement("p", { className: "text-xs", style: { color: 'var(--red)' } }, error),
             React.createElement("button", { type: "submit", className: "rounded-lg px-5 py-2 text-sm font-medium", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } }, isSetup ? 'Salvar e entrar' : 'Entrar'))));
 }
+function FornecedoresTab({ collection, documentos }) {
+    const [modalOpen, setModalOpen] = useState(false);
+    const [editing, setEditing] = useState(null);
+    const { items, loading, error, add, update, remove } = collection;
+    const handleSave = async (data) => {
+        if (editing)
+            await update(editing.id, data);
+        else
+            await add(data);
+        setModalOpen(false);
+        setEditing(null);
+    };
+    const docsDoFornecedor = (nome) => documentos.items.filter((d) => d.grupo === nome);
+    return (React.createElement(TabWatermark, null,
+        React.createElement("div", { className: "flex items-center justify-between mb-3" },
+            React.createElement("h2", { className: "font-semibold text-base", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, "Fornecedores"),
+            React.createElement("button", { onClick: () => { setEditing(null); setModalOpen(true); }, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } },
+                React.createElement(Plus, { size: 14 }),
+                " Novo fornecedor")),
+        error && React.createElement("p", { className: "text-xs mb-2", style: { color: 'var(--red)' } }, error),
+        loading ? (React.createElement("p", { className: "text-sm", style: { color: 'var(--text-muted)' } }, "Carregando...")) : items.length === 0 ? (React.createElement("div", { className: "rounded-xl p-6 text-center text-sm", style: { background: 'var(--paper-alt)', color: 'var(--text-muted)' } }, "Nenhum fornecedor cadastrado ainda. Adicione contato, cat\u00E1logo e outras informa\u00E7\u00F5es.")) : (React.createElement("div", { className: "space-y-3" }, items.map((f) => {
+            const docs = docsDoFornecedor(f.nome);
+            const contatoLinha = [f.contato, f.telefone, f.email].filter(Boolean).join(' · ');
+            return (React.createElement("div", { key: f.id, className: "rounded-xl p-4", style: { background: 'white', border: '1px solid var(--line)' } },
+                React.createElement("div", { className: "flex items-start justify-between gap-2" },
+                    React.createElement("div", { className: "min-w-0 flex-1" },
+                        React.createElement("p", { className: "font-medium text-sm", style: { color: 'var(--navy)' } }, f.nome),
+                        f.categoria && React.createElement("p", { className: "text-xs mt-0.5", style: { color: 'var(--text-muted)' } }, f.categoria),
+                        contatoLinha && React.createElement("p", { className: "text-xs mt-0.5", style: { color: 'var(--text-muted)' } }, contatoLinha),
+                        f.notas && React.createElement("p", { className: "text-xs mt-0.5", style: { color: 'var(--text-muted)' } }, f.notas)),
+                    React.createElement("div", { className: "flex gap-1 shrink-0" },
+                        f.site && (React.createElement("a", { href: f.site, target: "_blank", rel: "noopener noreferrer", className: "p-1.5 rounded-lg", style: { background: 'var(--paper-alt)' }, title: "Abrir site" },
+                            React.createElement(ExternalLink, { size: 14, color: "var(--navy)" }))),
+                        f.catalogoLink && (React.createElement("a", { href: f.catalogoLink, target: "_blank", rel: "noopener noreferrer", className: "p-1.5 rounded-lg", style: { background: 'var(--paper-alt)' }, title: "Abrir cat\u00E1logo" },
+                            React.createElement(FileText, { size: 14, color: "var(--navy)" }))),
+                        React.createElement("button", { onClick: () => { setEditing(f); setModalOpen(true); }, className: "p-1.5 rounded-lg", style: { background: 'var(--paper-alt)' } },
+                            React.createElement(Pencil, { size: 14, color: "var(--navy)" })),
+                        React.createElement("button", { onClick: () => remove(f.id), className: "p-1.5 rounded-lg", style: { background: 'var(--red-soft)' } },
+                            React.createElement(Trash2, { size: 14, color: "var(--red)" })))),
+                React.createElement("div", { className: "mt-3 pt-3", style: { borderTop: '1px solid var(--line)' } }, docs.length === 0 ? (React.createElement("p", { className: "text-xs", style: { color: 'var(--text-muted)' } },
+                    "Nenhum documento vinculado. Na aba Documentos, marque o campo \"Grupo\" como \"",
+                    f.nome,
+                    "\" para vincular aqui.")) : (React.createElement(React.Fragment, null,
+                    React.createElement("p", { className: "text-xs font-medium mb-1.5", style: { color: 'var(--navy)' } },
+                        docs.length,
+                        " documento(s) vinculado(s)"),
+                    React.createElement("div", { className: "space-y-1" }, docs.map((d) => (React.createElement("div", { key: d.id, className: "flex items-center justify-between gap-2" },
+                        React.createElement("span", { className: "text-xs truncate", style: { color: 'var(--text-muted)' } }, d.nome),
+                        d.link && (React.createElement("a", { href: d.link, target: "_blank", rel: "noopener noreferrer", className: "p-1 rounded shrink-0", style: { background: 'var(--paper-alt)' } },
+                            React.createElement(ExternalLink, { size: 12, color: "var(--navy)" })))))))))))); }))),
+        modalOpen && (React.createElement(RecordModal, { title: editing ? 'Editar fornecedor' : 'Novo fornecedor', fields: FORNECEDOR_FIELDS, initial: editing, onClose: () => { setModalOpen(false); setEditing(null); }, onSave: handleSave }))));
+}
 function DocumentosTab({ collection }) {
     const [grupoFiltro, setGrupoFiltro] = useState('Todos');
     const grupos = useMemo(() => {
@@ -2160,6 +2236,7 @@ function DashboardTab({ estoque, financeiro, licitacoes, cotacoes, acordos, mark
     const lotes = useCollection('distrisol:estoque-lotes');
     const agenda = useCollection('distrisol:agenda');
     const documentos = useCollection('distrisol:documentos');
+    const fornecedores = useCollection('distrisol:fornecedores');
     const [oculto, setOculto] = useState(false);
     const [ultimoBackup, setUltimoBackup] = useState(null);
     const [exportandoTudo, setExportandoTudo] = useState(false);
@@ -2285,6 +2362,19 @@ function DashboardTab({ estoque, financeiro, licitacoes, cotacoes, acordos, mark
                     'Notas': i.notas || '',
                 }));
             XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsDocumentos, { widths: { 'Nome do documento': 30, 'Tipo': 16, 'Vencimento': 14, 'Link': 40, 'Grupo': 22, 'Notas': 30 }, dateCols: ['Vencimento'] }), 'Documentos');
+            const rowsFornecedores = [...fornecedores.items]
+                .sort((a, b) => a.nome.localeCompare(b.nome))
+                .map((f) => ({
+                    'Nome': f.nome,
+                    'Categoria': f.categoria || '',
+                    'Contato': f.contato || '',
+                    'Telefone': f.telefone || '',
+                    'E-mail': f.email || '',
+                    'Site': f.site || '',
+                    'Catálogo': f.catalogoLink || '',
+                    'Notas': f.notas || '',
+                }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsFornecedores, { widths: { 'Nome': 24, 'Categoria': 18, 'Contato': 18, 'Telefone': 14, 'E-mail': 22, 'Site': 26, 'Catálogo': 26, 'Notas': 26 } }), 'Fornecedores');
             let empresaData = {};
             try {
                 const res = await storage.get('distrisol:empresa');
@@ -2402,6 +2492,7 @@ const TABS = [
     { key: 'estoque', label: 'Estoque', icon: Package },
     { key: 'financeiro', label: 'Financeiro', icon: Wallet },
     { key: 'vendas', label: 'Vendas', icon: ShoppingBagFallback },
+    { key: 'fornecedores', label: 'Fornecedores', icon: Store },
     { key: 'agenda', label: 'Agenda', icon: CalendarDays },
     { key: 'documentos', label: 'Documentos', icon: FileText },
     { key: 'empresa', label: 'Empresa', icon: Building2 },
@@ -2470,6 +2561,7 @@ function App() {
     const marketplace = useCollection('distrisol:vendas-marketplace');
     const agenda = useCollection('distrisol:agenda');
     const documentos = useCollection('distrisol:documentos');
+    const fornecedores = useCollection('distrisol:fornecedores');
     const vendasCollections = { licitacoes, cotacoes, acordos, marketplace };
     useEffect(() => {
         // Brand the tab title and the "Add to Home Screen" icon/name.
@@ -2540,6 +2632,7 @@ function App() {
                 tab === 'financeiro' && (React.createElement(PinGate, { storageKey: "distrisol:financeiro-pin" },
                     React.createElement(FinanceiroTab, { collection: financeiro }))),
                 tab === 'vendas' && React.createElement(VendasTab, { collections: vendasCollections }),
+                tab === 'fornecedores' && React.createElement(FornecedoresTab, { collection: fornecedores, documentos: documentos }),
                 tab === 'agenda' && React.createElement(AgendaTab, { collection: agenda, financeiro: financeiro }),
                 tab === 'documentos' && React.createElement(DocumentosTab, { collection: documentos }),
                 tab === 'empresa' && React.createElement(EmpresaTab, { storageKey: "distrisol:empresa" }))),
