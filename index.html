@@ -136,6 +136,8 @@ const CalendarPlus = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M3 10h18" }),
     React.createElement("line", { x1: "12", y1: "14", x2: "12", y2: "18" }),
     React.createElement("line", { x1: "10", y1: "16", x2: "14", y2: "16" }));
+const Check = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M20 6 9 17l-5-5" }));
 const Eye = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" }),
     React.createElement("circle", { cx: "12", cy: "12", r: "3" }));
@@ -1202,11 +1204,27 @@ function FinanceiroTemplatesSection({ templatesCollection, financeiroCollection 
             React.createElement("button", { onClick: () => setSubCategoria('Fixa'), className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: subCategoria === 'Fixa' ? 'var(--navy)' : 'var(--paper-alt)', color: subCategoria === 'Fixa' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Fixas"),
             React.createElement("button", { onClick: () => setSubCategoria('Variável'), className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: subCategoria === 'Variável' ? 'var(--navy)' : 'var(--paper-alt)', color: subCategoria === 'Variável' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Vari\u00E1veis")),
         subCategoria === 'Fixa'
-            ? React.createElement(EntitySection, { collection: templatesCollection, fields: TEMPLATE_FIELDS, title: "", addLabel: "Nova conta fixa", emptyLabel: "Nenhuma conta fixa cadastrada ainda.", getPrimary: (i) => i.nome, getSecondary: (i) => [
-                    `${i.tipo} · dia ${i.diaVencimento} de cada mês`,
-                    `Valor padrão: ${formatBRL(i.valorPadrao)}`,
-                ], getBadge: () => ({ text: 'Fixa', bg: 'var(--green-soft)', color: 'var(--green)' }), getExtraAction: (i) => (i.diaVencimento ? React.createElement("a", { href: buildRecurringICSDataUri(`${i.tipo}: ${i.nome}`, i.diaVencimento, 'Conta fixa'), download: `lembrete-mensal-${i.id}.ics`, className: "p-1.5 rounded-lg", style: { background: 'var(--paper-alt)' }, title: "Lembrete mensal no Calend\u00E1rio" },
-                React.createElement(CalendarPlus, { size: 14, color: "var(--navy)" })) : null) })
+            ? React.createElement(EntitySection, { collection: templatesCollection, fields: TEMPLATE_FIELDS, title: "", addLabel: "Nova conta fixa", emptyLabel: "Nenhuma conta fixa cadastrada ainda.", getPrimary: (i) => i.nome, getSecondary: (i) => {
+                    const agora = new Date();
+                    const competenciaAtual = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+                    const contaDoMes = financeiroCollection.items.find((f) => f.origemTemplateId === i.id && f.competencia === competenciaAtual);
+                    const statusTexto = contaDoMes ? (contaDoMes.status === 'Concluído' ? '✓ Pago este mês' : 'Pendente este mês') : 'Ainda não gerada este mês';
+                    return [
+                        `${i.tipo} · dia ${i.diaVencimento} de cada mês`,
+                        `Valor padrão: ${formatBRL(i.valorPadrao)}`,
+                        statusTexto,
+                    ];
+                }, getBadge: () => ({ text: 'Fixa', bg: 'var(--green-soft)', color: 'var(--green)' }), getExtraAction: (i) => {
+                    const agora = new Date();
+                    const competenciaAtual = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+                    const contaDoMes = financeiroCollection.items.find((f) => f.origemTemplateId === i.id && f.competencia === competenciaAtual);
+                    const pago = contaDoMes && contaDoMes.status === 'Concluído';
+                    return React.createElement(React.Fragment, null,
+                        i.diaVencimento && (React.createElement("a", { href: buildRecurringICSDataUri(`${i.tipo}: ${i.nome}`, i.diaVencimento, 'Conta fixa'), download: `lembrete-mensal-${i.id}.ics`, className: "p-1.5 rounded-lg", style: { background: 'var(--paper-alt)' }, title: "Lembrete mensal no Calend\u00E1rio" },
+                            React.createElement(CalendarPlus, { size: 14, color: "var(--navy)" }))),
+                        contaDoMes && (React.createElement("button", { onClick: () => financeiroCollection.update(contaDoMes.id, { status: pago ? 'Pendente' : 'Concluído' }), className: "p-1.5 rounded-lg", style: { background: pago ? 'var(--green-soft)' : 'var(--paper-alt)' }, title: pago ? 'Pago este m\u00EAs \u2014 toque para desmarcar' : 'Marcar como pago este m\u00EAs' },
+                            React.createElement(Check, { size: 14, color: pago ? 'var(--green)' : 'var(--text-muted)' }))));
+                } })
             : React.createElement(EntitySection, { collection: variaveisCollection, fields: FINANCEIRO_FIELDS, title: "", addLabel: "Nova vari\u00E1vel", emptyLabel: "Nenhum t\u00EDtulo avulso lan\u00E7ado ainda.", getPrimary: (i) => i.descricao, getSecondary: (i) => [
                     `${i.tipo} · vencimento ${formatDate(i.vencimento)}`,
                     formatBRL(i.valor),
