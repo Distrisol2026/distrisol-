@@ -1198,11 +1198,17 @@ function FinanceiroTemplatesSection({ templatesCollection, financeiroCollection 
         XLSX.writeFile(wb, 'distrisol-contas-fixas-variaveis.xlsx');
         await registrarUltimoBackup();
     };
-    const variaveisFiltradas = financeiroCollection.items.filter((i) => i.categoria === 'Variável');
+    const variaveisFiltradas = [...financeiroCollection.items]
+        .filter((i) => i.categoria === 'Variável')
+        .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento));
     const variaveisCollection = {
         ...financeiroCollection,
         items: variaveisFiltradas,
         add: (item) => financeiroCollection.add({ ...item, categoria: 'Variável' }),
+    };
+    const templatesOrdenadas = {
+        ...templatesCollection,
+        items: [...templatesCollection.items].sort((a, b) => Number(a.diaVencimento || 0) - Number(b.diaVencimento || 0)),
     };
     return (React.createElement("div", null,
         React.createElement("div", { className: "flex items-center justify-between mb-3 gap-2" },
@@ -1214,7 +1220,7 @@ function FinanceiroTemplatesSection({ templatesCollection, financeiroCollection 
             React.createElement("button", { onClick: () => setSubCategoria('Fixa'), className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: subCategoria === 'Fixa' ? 'var(--navy)' : 'var(--paper-alt)', color: subCategoria === 'Fixa' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Fixas"),
             React.createElement("button", { onClick: () => setSubCategoria('Variável'), className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: subCategoria === 'Variável' ? 'var(--navy)' : 'var(--paper-alt)', color: subCategoria === 'Variável' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Vari\u00E1veis")),
         subCategoria === 'Fixa'
-            ? React.createElement(EntitySection, { collection: templatesCollection, fields: TEMPLATE_FIELDS, title: "", addLabel: "Nova conta fixa", emptyLabel: "Nenhuma conta fixa cadastrada ainda.", getPrimary: (i) => i.nome, getSecondary: (i) => {
+            ? React.createElement(EntitySection, { collection: templatesOrdenadas, fields: TEMPLATE_FIELDS, title: "", addLabel: "Nova conta fixa", emptyLabel: "Nenhuma conta fixa cadastrada ainda.", getPrimary: (i) => i.nome, getSecondary: (i) => {
                     const agora = new Date();
                     const competenciaAtual = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
                     const contaDoMes = financeiroCollection.items.find((f) => f.origemTemplateId === i.id && f.competencia === competenciaAtual);
@@ -2620,8 +2626,21 @@ function App() {
         favicon.href = LOGO_SYMBOL;
         document.head.appendChild(favicon);
     }, []);
-    return (React.createElement("div", { className: "distrisol-app min-h-screen flex", style: { background: 'var(--paper)', fontFamily: 'var(--font-body)' } },
+    const hoje = new Date().toISOString().slice(0, 10);
+    const vencendoHoje = financeiro.items.filter((i) => i.vencimento === hoje && i.status !== 'Concluído');
+    return (React.createElement("div", { className: "distrisol-app min-h-screen flex flex-col", style: { background: 'var(--paper)', fontFamily: 'var(--font-body)' } },
         React.createElement("style", null, CSS),
+        vencendoHoje.length > 0 && (React.createElement("button", { onClick: () => setTab('financeiro'), className: "w-full flex items-center justify-center gap-2 text-sm font-medium shrink-0", style: {
+                background: 'var(--red)', color: 'white',
+                padding: '10px 16px',
+                paddingTop: 'max(10px, env(safe-area-inset-top))',
+                paddingLeft: 'max(16px, env(safe-area-inset-left))',
+                paddingRight: 'max(16px, env(safe-area-inset-right))',
+            } },
+            "\u26A0\uFE0F ",
+            vencendoHoje.length,
+            " conta(s) vencendo hoje \u2014 toque para ver")),
+        React.createElement("div", { className: "flex flex-1 min-h-0" },
         React.createElement("aside", { className: "hidden md:flex md:w-64 md:flex-col shrink-0", style: {
                 background: 'white', borderRight: '1px solid var(--line)',
                 padding: '20px',
@@ -2665,7 +2684,7 @@ function App() {
                 tab === 'fornecedores' && React.createElement(FornecedoresTab, { collection: fornecedores, documentos: documentos }),
                 tab === 'agenda' && React.createElement(AgendaTab, { collection: agenda, financeiro: financeiro }),
                 tab === 'documentos' && React.createElement(DocumentosTab, { collection: documentos }),
-                tab === 'empresa' && React.createElement(EmpresaTab, { storageKey: "distrisol:empresa" }))),
+                tab === 'empresa' && React.createElement(EmpresaTab, { storageKey: "distrisol:empresa" })))),
         React.createElement("nav", { className: "md:hidden fixed bottom-0 inset-x-0 flex items-stretch z-40 overflow-x-auto", style: {
                 background: 'var(--navy)', borderTop: '1px solid rgba(255,255,255,0.08)',
                 paddingBottom: 'env(safe-area-inset-bottom)',
