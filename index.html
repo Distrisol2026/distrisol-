@@ -1177,14 +1177,22 @@ function FinanceiroTable({ items, update, remove }) {
 function FinanceiroTemplatesSection({ templatesCollection, financeiroCollection }) {
     const [subCategoria, setSubCategoria] = useState('Fixa');
     const handleExportTemplates = async () => {
-        const rowsFixas = templatesCollection.items.map((i) => ({
-            'Nome': i.nome,
+        const agora = new Date();
+        const competenciaAtual = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+        const optsContas = { widths: { 'Descrição': 28, 'Tipo': 12, 'Valor (R$)': 14, 'Vencimento': 14, 'Status': 12 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] };
+        const rowsFixas = financeiroCollection.items
+            .filter((i) => i.categoria === 'Fixa' && i.competencia === competenciaAtual)
+            .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
+            .map((i) => ({
+            'Descrição': i.descricao,
             'Tipo': i.tipo,
-            'Valor padrão (R$)': Number(i.valorPadrao) || 0,
-            'Dia do vencimento': i.diaVencimento,
+            'Valor (R$)': Number(i.valor) || 0,
+            'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+            'Status': i.status,
         }));
         const rowsVariaveis = financeiroCollection.items
             .filter((i) => i.categoria === 'Variável')
+            .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
             .map((i) => ({
             'Descrição': i.descricao,
             'Tipo': i.tipo,
@@ -1193,8 +1201,8 @@ function FinanceiroTemplatesSection({ templatesCollection, financeiroCollection 
             'Status': i.status,
         }));
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsFixas, { widths: { 'Nome': 28, 'Tipo': 12, 'Valor padrão (R$)': 16, 'Dia do vencimento': 16 }, currencyCols: ['Valor padrão (R$)'] }), 'Fixas');
-        XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsVariaveis, { widths: { 'Descrição': 28, 'Tipo': 12, 'Valor (R$)': 14, 'Vencimento': 14, 'Status': 12 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] }), 'Variáveis');
+        XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsFixas, optsContas), 'Fixas (mês atual)');
+        XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsVariaveis, optsContas), 'Variáveis');
         XLSX.writeFile(wb, 'distrisol-contas-fixas-variaveis.xlsx');
         await registrarUltimoBackup();
     };
@@ -1333,15 +1341,12 @@ function FinanceiroTab({ collection }) {
             const optsContas = { widths: { 'Vencimento': 14, 'Descrição': 34, 'Valor (R$)': 14, 'Status': 12, 'Observação': 26 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] };
             XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRowsContas(pagar), optsContas), 'A Pagar');
             XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRowsContas(receber), optsContas), 'A Receber');
-            const rowsFixas = templates.items.map((i) => ({
-                'Nome': i.nome,
-                'Tipo': i.tipo,
-                'Valor padrão (R$)': Number(i.valorPadrao) || 0,
-                'Dia do vencimento': i.diaVencimento,
-            }));
-            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsFixas, { widths: { 'Nome': 28, 'Tipo': 12, 'Valor padrão (R$)': 16, 'Dia do vencimento': 16 }, currencyCols: ['Valor padrão (R$)'] }), 'Fixas');
-            const rowsVariaveis = items
-                .filter((i) => i.categoria === 'Variável')
+            const optsFixasVar = { widths: { 'Descrição': 28, 'Tipo': 12, 'Valor (R$)': 14, 'Vencimento': 14, 'Status': 12 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] };
+            const agoraFV = new Date();
+            const competenciaAtualFV = `${agoraFV.getFullYear()}-${String(agoraFV.getMonth() + 1).padStart(2, '0')}`;
+            const rowsFixas = items
+                .filter((i) => i.categoria === 'Fixa' && i.competencia === competenciaAtualFV)
+                .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
                 .map((i) => ({
                 'Descrição': i.descricao,
                 'Tipo': i.tipo,
@@ -1349,8 +1354,18 @@ function FinanceiroTab({ collection }) {
                 'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
                 'Status': i.status,
             }));
-            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsVariaveis, { widths: { 'Descrição': 28, 'Tipo': 12, 'Valor (R$)': 14, 'Vencimento': 14, 'Status': 12 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] }), 'Variáveis');
-            // Resto do app
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsFixas, optsFixasVar), 'Fixas (mês atual)');
+            const rowsVariaveis = items
+                .filter((i) => i.categoria === 'Variável')
+                .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
+                .map((i) => ({
+                'Descrição': i.descricao,
+                'Tipo': i.tipo,
+                'Valor (R$)': Number(i.valor) || 0,
+                'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+                'Status': i.status,
+            }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsVariaveis, optsFixasVar), 'Variáveis');
             const rowsEstoque = [...estoqueCompleto.items]
                 .sort((a, b) => a.nome.localeCompare(b.nome))
                 .map((i) => ({
@@ -1461,15 +1476,12 @@ function FinanceiroTab({ collection }) {
             const optsContas = { widths: { 'Vencimento': 14, 'Descrição': 34, 'Valor (R$)': 14, 'Status': 12, 'Observação': 26 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] };
             XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRowsContas(pagar), optsContas), 'A Pagar');
             XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRowsContas(receber), optsContas), 'A Receber');
-            const rowsFixas = templates.items.map((i) => ({
-                'Nome': i.nome,
-                'Tipo': i.tipo,
-                'Valor padrão (R$)': Number(i.valorPadrao) || 0,
-                'Dia do vencimento': i.diaVencimento,
-            }));
-            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsFixas, { widths: { 'Nome': 28, 'Tipo': 12, 'Valor padrão (R$)': 16, 'Dia do vencimento': 16 }, currencyCols: ['Valor padrão (R$)'] }), 'Fixas');
-            const rowsVariaveis = items
-                .filter((i) => i.categoria === 'Variável')
+            const optsFixasVar = { widths: { 'Descrição': 28, 'Tipo': 12, 'Valor (R$)': 14, 'Vencimento': 14, 'Status': 12 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] };
+            const agoraFV = new Date();
+            const competenciaAtualFV = `${agoraFV.getFullYear()}-${String(agoraFV.getMonth() + 1).padStart(2, '0')}`;
+            const rowsFixas = items
+                .filter((i) => i.categoria === 'Fixa' && i.competencia === competenciaAtualFV)
+                .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
                 .map((i) => ({
                 'Descrição': i.descricao,
                 'Tipo': i.tipo,
@@ -1477,7 +1489,18 @@ function FinanceiroTab({ collection }) {
                 'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
                 'Status': i.status,
             }));
-            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsVariaveis, { widths: { 'Descrição': 28, 'Tipo': 12, 'Valor (R$)': 14, 'Vencimento': 14, 'Status': 12 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] }), 'Variáveis');
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsFixas, optsFixasVar), 'Fixas (mês atual)');
+            const rowsVariaveis = items
+                .filter((i) => i.categoria === 'Variável')
+                .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
+                .map((i) => ({
+                'Descrição': i.descricao,
+                'Tipo': i.tipo,
+                'Valor (R$)': Number(i.valor) || 0,
+                'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+                'Status': i.status,
+            }));
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsVariaveis, optsFixasVar), 'Variáveis');
             const rowsEstoque = [...estoqueCompleto.items]
                 .sort((a, b) => a.nome.localeCompare(b.nome))
                 .map((i) => ({
