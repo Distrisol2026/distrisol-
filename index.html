@@ -18,6 +18,15 @@
       el.innerHTML = '<div style="font-family:sans-serif;padding:24px;color:#B5453E;white-space:pre-wrap;">Erro ao carregar o app:\n\n' +
         (e.message || 'erro desconhecido') + '\n\nArquivo: ' + (e.filename || '-') + ' linha ' + (e.lineno || '-') +
         '</div>';
+    } else if (el && el.dataset.rendered) {
+      alert('N\u00E3o consegui concluir essa a\u00E7\u00E3o.\n\n' + (e.message || 'erro desconhecido') + '\n\nTente novamente.');
+    }
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var el = document.getElementById('root');
+    if (el && el.dataset.rendered) {
+      var msg = (e.reason && e.reason.message) ? e.reason.message : String(e.reason || 'erro desconhecido');
+      alert('N\u00E3o consegui concluir essa a\u00E7\u00E3o.\n\n' + msg + '\n\nTente novamente.');
     }
   });
   function cdnFailed(name) {
@@ -284,9 +293,17 @@ const buildStyledSheet = (rows, opts) => {
     const widths = opts.widths || {};
     const currencyCols = opts.currencyCols || [];
     const dateCols = opts.dateCols || [];
-    const ws = XLSX.utils.json_to_sheet(rows);
-    if (!ws['!ref'])
+    const headerNames = Object.keys(widths);
+    const ws = (rows && rows.length > 0)
+        ? XLSX.utils.json_to_sheet(rows)
+        : XLSX.utils.json_to_sheet([], headerNames.length > 0 ? { header: headerNames } : undefined);
+    if (!ws['!ref']) {
+        // Last-resort fallback: force a minimal valid sheet so writeFile never
+        // chokes on a worksheet with no defined range.
+        ws['!ref'] = 'A1';
+        ws['A1'] = { t: 's', v: 'Nenhum registro' };
         return ws;
+    }
     const range = XLSX.utils.decode_range(ws['!ref']);
     const headers = [];
     for (let c = range.s.c; c <= range.e.c; c++) {
