@@ -1275,6 +1275,101 @@ function FinanceiroTemplatesSection({ templatesCollection, financeiroCollection 
                     return React.createElement(PagoToggleButton, { pago: pago, onToggle: () => financeiroCollection.update(i.id, { status: pago ? 'Pendente' : 'Concluído' }), title: pago ? `${i.tipo === 'Pagar' ? 'Pago' : 'Recebido'} \u2014 toque para desmarcar` : `Marcar como ${i.tipo === 'Pagar' ? 'pago' : 'recebido'}` });
                 } })));
 }
+function ExportarPersonalizadoModal({ items, onClose }) {
+    const agora = new Date();
+    const mesAtual = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+    const [selecionados, setSelecionados] = useState({ fixas: true, variaveis: true, aPagar: false, aReceber: false });
+    const [mesFiltro, setMesFiltro] = useState(mesAtual);
+    const [todosOsMeses, setTodosOsMeses] = useState(false);
+    const [exportando, setExportando] = useState(false);
+    const toggle = (key) => setSelecionados((prev) => ({ ...prev, [key]: !prev[key] }));
+    const opcoes = [
+        { key: 'fixas', label: 'Fixas' },
+        { key: 'variaveis', label: 'Variáveis' },
+        { key: 'aPagar', label: 'A Pagar' },
+        { key: 'aReceber', label: 'A Receber' },
+    ];
+    const handleExport = async () => {
+        if (!Object.values(selecionados).some(Boolean)) {
+            alert('Selecione ao menos um item para exportar.');
+            return;
+        }
+        setExportando(true);
+        try {
+            const wb = XLSX.utils.book_new();
+            const optsFixasVar = { widths: { 'Descrição': 28, 'Tipo': 12, 'Valor (R$)': 14, 'Vencimento': 14, 'Status': 12 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] };
+            const optsContas = { widths: { 'Vencimento': 14, 'Descrição': 34, 'Valor (R$)': 14, 'Status': 12, 'Observação': 26 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] };
+            const [anoSel, mesSel] = mesFiltro.split('-').map(Number);
+            const primeiroDia = `${mesFiltro}-01`;
+            const ultimoDiaNum = new Date(anoSel, mesSel, 0).getDate();
+            const ultimoDia = `${mesFiltro}-${String(ultimoDiaNum).padStart(2, '0')}`;
+            const rotuloMes = todosOsMeses ? '(todos os meses)' : `(${mesFiltro})`;
+            if (selecionados.fixas) {
+                const rowsFixas = items
+                    .filter((i) => i.categoria === 'Fixa' && (todosOsMeses || i.competencia === mesFiltro))
+                    .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
+                    .map((i) => ({
+                    'Descrição': i.descricao,
+                    'Tipo': i.tipo,
+                    'Valor (R$)': Number(i.valor) || 0,
+                    'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+                    'Status': i.status,
+                }));
+                XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsFixas, optsFixasVar), `Fixas ${rotuloMes}`.slice(0, 31));
+            }
+            if (selecionados.variaveis) {
+                const rowsVariaveis = items
+                    .filter((i) => i.categoria === 'Variável' && (todosOsMeses || (i.vencimento && i.vencimento >= primeiroDia && i.vencimento <= ultimoDia)))
+                    .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
+                    .map((i) => ({
+                    'Descrição': i.descricao,
+                    'Tipo': i.tipo,
+                    'Valor (R$)': Number(i.valor) || 0,
+                    'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+                    'Status': i.status,
+                }));
+                XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsVariaveis, optsFixasVar), `Variáveis ${rotuloMes}`.slice(0, 31));
+            }
+            const buildRowsContas = (list) => [...list]
+                .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
+                .map((i) => ({
+                    'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+                    'Descrição': i.descricao,
+                    'Valor (R$)': Number(i.valor) || 0,
+                    'Status': i.status,
+                    'Observação': i.obs || '',
+                }));
+            if (selecionados.aPagar) {
+                XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRowsContas(items.filter((i) => i.tipo === 'Pagar')), optsContas), 'A Pagar');
+            }
+            if (selecionados.aReceber) {
+                XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRowsContas(items.filter((i) => i.tipo === 'Receber')), optsContas), 'A Receber');
+            }
+            XLSX.writeFile(wb, 'distrisol-relatorio-personalizado.xlsx');
+            await registrarUltimoBackup();
+            onClose();
+        }
+        finally {
+            setExportando(false);
+        }
+    };
+    return (React.createElement("div", { className: "fixed inset-0 z-50 flex items-center justify-center", style: { background: 'rgba(20,33,61,0.45)', zIndex: 100, padding: '16px' }, onClick: onClose },
+        React.createElement("div", { className: "w-full md:max-w-sm rounded-2xl", style: { background: 'var(--paper)', padding: '20px' }, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { className: "flex items-center justify-between mb-4" },
+                React.createElement("h3", { className: "font-semibold text-lg", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, "Exportar \u2014 escolher"),
+                React.createElement("button", { onClick: onClose, className: "p-1 rounded-full" },
+                    React.createElement(X, { size: 20, color: "var(--navy)" }))),
+            React.createElement("div", { className: "space-y-2 mb-4" }, opcoes.map((op) => (React.createElement("label", { key: op.key, className: "flex items-center gap-2 text-sm rounded-lg p-2.5", style: { background: 'white', border: '1px solid var(--line)', color: 'var(--text)' } },
+                React.createElement("input", { type: "checkbox", checked: selecionados[op.key], onChange: () => toggle(op.key), style: { width: '18px', height: '18px', accentColor: 'var(--navy)' } }),
+                op.label)))),
+            React.createElement("p", { className: "text-xs font-medium mb-2", style: { color: 'var(--text-muted)' } }, "Per\u00EDodo (vale pra Fixas e Vari\u00E1veis)"),
+            React.createElement("div", { className: "flex items-center gap-2 mb-4" },
+                React.createElement("input", { type: "month", value: mesFiltro, disabled: todosOsMeses, onChange: (e) => setMesFiltro(e.target.value), className: "flex-1 rounded-lg px-3 py-2 text-sm border", style: { borderColor: 'var(--line)', background: todosOsMeses ? 'var(--paper-alt)' : 'white', color: 'var(--text)' } })),
+            React.createElement("label", { className: "flex items-center gap-2 text-sm mb-4", style: { color: 'var(--text-muted)' } },
+                React.createElement("input", { type: "checkbox", checked: todosOsMeses, onChange: () => setTodosOsMeses((v) => !v), style: { width: '16px', height: '16px', accentColor: 'var(--navy)' } }),
+                "Todos os meses (ignorar per\u00EDodo)"),
+            React.createElement("button", { onClick: handleExport, disabled: exportando, className: "w-full rounded-lg py-2.5 font-medium text-sm", style: { background: 'var(--navy)', color: 'var(--teal-soft)', opacity: exportando ? 0.6 : 1 } }, exportando ? 'Exportando...' : 'Exportar selecionados'))));
+}
 function FinanceiroTab({ collection }) {
     const { items, loading, error, add, update, remove } = collection;
     const [modalOpen, setModalOpen] = useState(false);
@@ -1284,6 +1379,7 @@ function FinanceiroTab({ collection }) {
     const [prazoValor, setPrazoValor] = useState(7);
     const [prazoUnidade, setPrazoUnidade] = useState('dias');
     const [mostrarRelatorioFin, setMostrarRelatorioFin] = useState(false);
+    const [exportarPersonalizadoOpen, setExportarPersonalizadoOpen] = useState(false);
     useEffect(() => {
         if (!mostrarRelatorioFin)
             return;
@@ -1631,6 +1727,7 @@ function FinanceiroTab({ collection }) {
                     React.createElement("button", { onClick: () => setImportModalOpen(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Importar planilha"),
                     React.createElement("button", { onClick: handleExport, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar Excel"),
                     React.createElement("button", { onClick: () => setMostrarRelatorioFin(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Relat\u00F3rio PDF"),
+                    React.createElement("button", { onClick: () => setExportarPersonalizadoOpen(true), className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } }, "Exportar \u2014 escolher"),
                     React.createElement("button", { onClick: handleExportEssencial, disabled: exportandoEssencial, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)', opacity: exportandoEssencial ? 0.6 : 1 } }, exportandoEssencial ? 'Exportando...' : 'Backup essencial'),
                     React.createElement("button", { onClick: handleExportCompleto, disabled: exportandoCompleto, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)', opacity: exportandoCompleto ? 0.6 : 1 } }, exportandoCompleto ? 'Exportando...' : 'Backup completo (tudo)'),
                     React.createElement("button", { onClick: () => { setEditing(null); setModalOpen(true); }, className: "flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-full", style: { background: 'var(--navy)', color: 'var(--teal-soft)' } },
@@ -1671,6 +1768,7 @@ function FinanceiroTab({ collection }) {
                 renderList(receber, 'Contas a receber · Clientes'))),
             modalOpen && (React.createElement(RecordModal, { title: editing ? 'Editar conta' : 'Nova conta', fields: FINANCEIRO_FIELDS, initial: editing, onClose: () => { setModalOpen(false); setEditing(null); }, onSave: handleSave })),
             importModalOpen && (React.createElement(ImportFinanceiroModal, { collection: collection, onClose: () => setImportModalOpen(false) })),
+            exportarPersonalizadoOpen && React.createElement(ExportarPersonalizadoModal, { items: items, onClose: () => setExportarPersonalizadoOpen(false) }),
             mostrarRelatorioFin && React.createElement(PrintableReport, { title: "Relat\u00F3rio Financeiro \u2014 Distrisol", subtitle: `Gerado em ${formatDate(new Date().toISOString().slice(0, 10))}`, sections: [
                     { heading: 'Resumo', rows: [
                             ['Saldo previsto', formatBRL(totalReceberPendente - totalPagarPendente)],
