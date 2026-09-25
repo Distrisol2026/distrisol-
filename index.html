@@ -602,10 +602,10 @@ function PrintableReport({ title, subtitle, sections }) {
         let body;
         if (sec.rows && sec.rows.length > 0) {
             const trs = sec.rows.map((row, j) => {
-                const tds = row.map((cell, k) => React.createElement("td", { key: k, style: { padding: '4px 8px', borderBottom: '1px solid #eee' } }, cell));
+                const tds = row.map((cell, k) => React.createElement("td", { key: k, style: { padding: '4px 8px', borderBottom: '1px solid #eee', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '220px' } }, cell));
                 return React.createElement("tr", { key: j }, tds);
             });
-            body = React.createElement("table", { style: { width: '100%', borderCollapse: 'collapse', fontSize: '11px' } }, React.createElement("tbody", null, trs));
+            body = React.createElement("table", { style: { width: '100%', borderCollapse: 'collapse', fontSize: '11px', tableLayout: 'fixed' } }, React.createElement("tbody", null, trs));
         }
         else {
             body = React.createElement("p", { style: { fontSize: '11px', color: '#777' } }, sec.empty || 'Nenhum registro.');
