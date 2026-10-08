@@ -1275,11 +1275,11 @@ function FinanceiroTemplatesSection({ templatesCollection, financeiroCollection 
                     return React.createElement(PagoToggleButton, { pago: pago, onToggle: () => financeiroCollection.update(i.id, { status: pago ? 'Pendente' : 'Concluído' }), title: pago ? `${i.tipo === 'Pagar' ? 'Pago' : 'Recebido'} \u2014 toque para desmarcar` : `Marcar como ${i.tipo === 'Pagar' ? 'pago' : 'recebido'}` });
                 } })));
 }
-function ExportarPersonalizadoModal({ items, onClose }) {
+function ExportarPersonalizadoModal({ items, onClose, initialMes }) {
     const agora = new Date();
     const mesAtual = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
     const [selecionados, setSelecionados] = useState({ fixas: true, variaveis: true, aPagar: false, aReceber: false });
-    const [mesFiltro, setMesFiltro] = useState(mesAtual);
+    const [mesFiltro, setMesFiltro] = useState(initialMes || mesAtual);
     const [todosOsMeses, setTodosOsMeses] = useState(false);
     const [exportando, setExportando] = useState(false);
     const toggle = (key) => setSelecionados((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -1370,6 +1370,99 @@ function ExportarPersonalizadoModal({ items, onClose }) {
                 "Todos os meses (ignorar per\u00EDodo)"),
             React.createElement("button", { onClick: handleExport, disabled: exportando, className: "w-full rounded-lg py-2.5 font-medium text-sm", style: { background: 'var(--navy)', color: 'var(--teal-soft)', opacity: exportando ? 0.6 : 1 } }, exportando ? 'Exportando...' : 'Exportar selecionados'))));
 }
+const NOMES_MES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+function CalendarioFinanceiro({ items, onExportMonth, onTogglePago }) {
+    const hoje = new Date();
+    const [ano, setAno] = useState(hoje.getFullYear());
+    const [mes, setMes] = useState(hoje.getMonth() + 1); // 1-12
+    const [diaSelecionado, setDiaSelecionado] = useState(null);
+    const mesStr = `${ano}-${String(mes).padStart(2, '0')}`;
+    const primeiroDiaSemana = new Date(ano, mes - 1, 1).getDay();
+    const totalDias = new Date(ano, mes, 0).getDate();
+    const contasDoMes = items.filter((i) => (i.categoria === 'Fixa' || i.categoria === 'Variável') && i.vencimento && i.vencimento.startsWith(mesStr));
+    const contasPorDia = {};
+    contasDoMes.forEach((i) => {
+        const dia = Number(i.vencimento.slice(8, 10));
+        if (!contasPorDia[dia])
+            contasPorDia[dia] = [];
+        contasPorDia[dia].push(i);
+    });
+    const irMesAnterior = () => {
+        if (mes === 1) {
+            setAno(ano - 1);
+            setMes(12);
+        }
+        else {
+            setMes(mes - 1);
+        }
+        setDiaSelecionado(null);
+    };
+    const irMesSeguinte = () => {
+        if (mes === 12) {
+            setAno(ano + 1);
+            setMes(1);
+        }
+        else {
+            setMes(mes + 1);
+        }
+        setDiaSelecionado(null);
+    };
+    const celulas = [];
+    for (let i = 0; i < primeiroDiaSemana; i++)
+        celulas.push(null);
+    for (let d = 1; d <= totalDias; d++)
+        celulas.push(d);
+    const contasDoDiaSelecionado = diaSelecionado ? (contasPorDia[diaSelecionado] || []) : [];
+    return (React.createElement("div", null,
+        React.createElement("div", { className: "flex items-center justify-between mb-3" },
+            React.createElement("button", { onClick: irMesAnterior, className: "p-2 rounded-lg", style: { background: 'var(--paper-alt)' } },
+                React.createElement("span", { style: { color: 'var(--navy)', fontWeight: 600 } }, "\u2039")),
+            React.createElement("h3", { className: "text-sm font-semibold", style: { color: 'var(--navy)' } },
+                NOMES_MES[mes - 1],
+                " ",
+                ano),
+            React.createElement("button", { onClick: irMesSeguinte, className: "p-2 rounded-lg", style: { background: 'var(--paper-alt)' } },
+                React.createElement("span", { style: { color: 'var(--navy)', fontWeight: 600 } }, "\u203A"))),
+        React.createElement("button", { onClick: () => onExportMonth(mesStr), className: "w-full text-xs font-medium py-2 rounded-lg mb-3", style: { background: 'var(--paper-alt)', color: 'var(--navy)', border: '1px solid var(--line)' } },
+            "Exportar ",
+            NOMES_MES[mes - 1],
+            " ",
+            ano),
+        React.createElement("div", { className: "grid grid-cols-7 gap-1 mb-1 text-center" }, ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map((d, i) => (React.createElement("span", { key: i, className: "text-xs font-medium", style: { color: 'var(--text-muted)' } }, d)))),
+        React.createElement("div", { className: "grid grid-cols-7 gap-1" }, celulas.map((d, idx) => {
+            if (d === null)
+                return React.createElement("div", { key: idx });
+            const contas = contasPorDia[d] || [];
+            const temPendente = contas.some((c) => c.status !== 'Concluído');
+            const temPago = contas.some((c) => c.status === 'Concluído');
+            const isHoje = ano === hoje.getFullYear() && mes === hoje.getMonth() + 1 && d === hoje.getDate();
+            const selecionado = diaSelecionado === d;
+            return (React.createElement("button", { key: idx, onClick: () => setDiaSelecionado(selecionado ? null : d), className: "aspect-square rounded-lg flex flex-col items-center justify-center text-xs", style: {
+                    background: selecionado ? 'var(--navy)' : isHoje ? 'var(--teal-soft)' : 'white',
+                    border: '1px solid var(--line)',
+                    color: selecionado ? 'white' : 'var(--text)',
+                } },
+                d,
+                contas.length > 0 && (React.createElement("div", { className: "flex gap-0.5 mt-0.5" },
+                    temPendente && React.createElement("span", { style: { width: '5px', height: '5px', borderRadius: '50%', background: selecionado ? 'white' : 'var(--red)' } }),
+                    temPago && React.createElement("span", { style: { width: '5px', height: '5px', borderRadius: '50%', background: selecionado ? 'white' : 'var(--green)' } })))));
+        })),
+        diaSelecionado && (React.createElement("div", { className: "mt-4 space-y-2" },
+            React.createElement("p", { className: "text-sm font-semibold", style: { color: 'var(--navy)' } },
+                diaSelecionado,
+                " de ",
+                NOMES_MES[mes - 1]),
+            contasDoDiaSelecionado.length === 0 ? (React.createElement("p", { className: "text-xs", style: { color: 'var(--text-muted)' } }, "Nada neste dia.")) : (contasDoDiaSelecionado.map((c) => (React.createElement("div", { key: c.id, className: "rounded-xl p-3 flex items-center justify-between gap-2", style: { background: 'white', border: '1px solid var(--line)' } },
+                React.createElement("div", { className: "min-w-0" },
+                    React.createElement("p", { className: "text-sm font-medium truncate", style: { color: 'var(--navy)' } }, c.descricao),
+                    React.createElement("p", { className: "text-xs", style: { color: 'var(--text-muted)' } },
+                        c.categoria,
+                        " · ",
+                        c.tipo,
+                        " · ",
+                        formatBRL(c.valor))),
+                React.createElement(PagoToggleButton, { pago: c.status === 'Concluído', onToggle: () => onTogglePago(c) })))))))));
+}
 function FinanceiroTab({ collection }) {
     const { items, loading, error, add, update, remove } = collection;
     const [modalOpen, setModalOpen] = useState(false);
@@ -1380,6 +1473,7 @@ function FinanceiroTab({ collection }) {
     const [prazoUnidade, setPrazoUnidade] = useState('dias');
     const [mostrarRelatorioFin, setMostrarRelatorioFin] = useState(false);
     const [exportarPersonalizadoOpen, setExportarPersonalizadoOpen] = useState(false);
+    const [exportarMesInicial, setExportarMesInicial] = useState(null);
     useEffect(() => {
         if (!mostrarRelatorioFin)
             return;
@@ -1760,15 +1854,17 @@ function FinanceiroTab({ collection }) {
             React.createElement("div", { className: "flex gap-2 mt-4 mb-1 overflow-x-auto pb-1" },
                 React.createElement("button", { onClick: () => setViewMode('cards'), className: "text-xs font-medium px-3 py-1.5 rounded-full shrink-0", style: { background: viewMode === 'cards' ? 'var(--navy)' : 'var(--paper-alt)', color: viewMode === 'cards' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Cart\u00F5es"),
                 React.createElement("button", { onClick: () => setViewMode('tabela'), className: "text-xs font-medium px-3 py-1.5 rounded-full shrink-0", style: { background: viewMode === 'tabela' ? 'var(--navy)' : 'var(--paper-alt)', color: viewMode === 'tabela' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Tabela (editar direto)"),
-                React.createElement("button", { onClick: () => setViewMode('fixas'), className: "text-xs font-medium px-3 py-1.5 rounded-full shrink-0", style: { background: viewMode === 'fixas' ? 'var(--navy)' : 'var(--paper-alt)', color: viewMode === 'fixas' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Fixas/Vari\u00E1veis")),
+                React.createElement("button", { onClick: () => setViewMode('fixas'), className: "text-xs font-medium px-3 py-1.5 rounded-full shrink-0", style: { background: viewMode === 'fixas' ? 'var(--navy)' : 'var(--paper-alt)', color: viewMode === 'fixas' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Fixas/Vari\u00E1veis"),
+                React.createElement("button", { onClick: () => setViewMode('calendario'), className: "text-xs font-medium px-3 py-1.5 rounded-full shrink-0", style: { background: viewMode === 'calendario' ? 'var(--navy)' : 'var(--paper-alt)', color: viewMode === 'calendario' ? 'var(--teal-soft)' : 'var(--text-muted)' } }, "Calend\u00E1rio")),
             viewMode === 'fixas' ? (React.createElement("div", { className: "mt-3" },
-                React.createElement(FinanceiroTemplatesSection, { templatesCollection: templates, financeiroCollection: collection }))) : loading ? (React.createElement("p", { className: "text-sm mt-4", style: { color: 'var(--text-muted)' } }, "Carregando...")) : viewMode === 'tabela' ? (React.createElement("div", { className: "mt-3" },
+                React.createElement(FinanceiroTemplatesSection, { templatesCollection: templates, financeiroCollection: collection }))) : viewMode === 'calendario' ? (React.createElement("div", { className: "mt-3" },
+                React.createElement(CalendarioFinanceiro, { items: items, onExportMonth: (mesStr) => { setExportarMesInicial(mesStr); setExportarPersonalizadoOpen(true); }, onTogglePago: (c) => update(c.id, { status: c.status === 'Concluído' ? 'Pendente' : 'Concluído' }) }))) : loading ? (React.createElement("p", { className: "text-sm mt-4", style: { color: 'var(--text-muted)' } }, "Carregando...")) : viewMode === 'tabela' ? (React.createElement("div", { className: "mt-3" },
                 React.createElement(FinanceiroTable, { items: items, update: update, remove: remove }))) : (React.createElement(React.Fragment, null,
                 renderList(pagar, 'Contas a pagar · Fornecedores'),
                 renderList(receber, 'Contas a receber · Clientes'))),
             modalOpen && (React.createElement(RecordModal, { title: editing ? 'Editar conta' : 'Nova conta', fields: FINANCEIRO_FIELDS, initial: editing, onClose: () => { setModalOpen(false); setEditing(null); }, onSave: handleSave })),
             importModalOpen && (React.createElement(ImportFinanceiroModal, { collection: collection, onClose: () => setImportModalOpen(false) })),
-            exportarPersonalizadoOpen && React.createElement(ExportarPersonalizadoModal, { items: items, onClose: () => setExportarPersonalizadoOpen(false) }),
+            exportarPersonalizadoOpen && React.createElement(ExportarPersonalizadoModal, { items: items, initialMes: exportarMesInicial, onClose: () => { setExportarPersonalizadoOpen(false); setExportarMesInicial(null); } }),
             mostrarRelatorioFin && React.createElement(PrintableReport, { title: "Relat\u00F3rio Financeiro \u2014 Distrisol", subtitle: `Gerado em ${formatDate(new Date().toISOString().slice(0, 10))}`, sections: [
                     { heading: 'Resumo', rows: [
                             ['Saldo previsto', formatBRL(totalReceberPendente - totalPagarPendente)],
