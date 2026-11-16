@@ -181,11 +181,10 @@ const CSS = `
   outline: 2px solid var(--teal);
   outline-offset: 1px;
 }
-.printable-report { display: none; }
 @media print {
-  body * { visibility: hidden; }
-  .printable-report, .printable-report * { visibility: visible; }
-  .printable-report { display: block; position: absolute; top: 0; left: 0; width: 100%; }
+  #root { display: none !important; }
+  .report-toolbar { display: none !important; }
+  .report-overlay { position: static !important; overflow: visible !important; height: auto !important; background: white !important; }
 }
 `;
 // Logo assets (embedded so the app works standalone without external hosting)
@@ -625,6 +624,14 @@ function PrintableReport({ title, subtitle, sections }) {
         React.createElement("p", { style: { fontSize: '9px', color: '#999', marginTop: '24px' } },
             "Gerado pelo Distrisol Admin em ",
             new Date().toLocaleString('pt-BR'))));
+}
+function ReportPreviewModal({ title, subtitle, sections, onClose }) {
+    const btn = { border: 'none', borderRadius: '999px', padding: '8px 16px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' };
+    return ReactDOM.createPortal(React.createElement("div", { className: "report-overlay", style: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 300, background: 'white', overflowY: 'auto' } },
+        React.createElement("div", { className: "report-toolbar", style: { position: 'sticky', top: 0, zIndex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', padding: '12px 16px', paddingTop: 'max(12px, env(safe-area-inset-top))', background: '#0C335A' } },
+            React.createElement("button", { onClick: onClose, style: { ...btn, background: 'transparent', color: '#B7E0D2', border: '1px solid #B7E0D2' } }, "Fechar"),
+            React.createElement("button", { onClick: () => window.print(), style: { ...btn, background: '#B7E0D2', color: '#0C335A' } }, "Imprimir / Salvar PDF")),
+        React.createElement(PrintableReport, { title: title, subtitle: subtitle, sections: sections })), document.body);
 }
 function MovimentoModal({ produtos, onClose, onSave }) {
     const [produtoId, setProdutoId] = useState(produtos[0]?.id || '');
@@ -1283,7 +1290,9 @@ function ExportarPersonalizadoModal({ items, onClose, initialMes }) {
     const [selecionados, setSelecionados] = useState({ fixas: true, variaveis: true, aPagar: false, aReceber: false });
     const [mesFiltro, setMesFiltro] = useState(initialMes || mesAtual);
     const [todosOsMeses, setTodosOsMeses] = useState(false);
+    const [formato, setFormato] = useState('excel');
     const [exportando, setExportando] = useState(false);
+    const [mostrarPreview, setMostrarPreview] = useState(false);
     const toggle = (key) => setSelecionados((prev) => ({ ...prev, [key]: !prev[key] }));
     const opcoes = [
         { key: 'fixas', label: 'Fixas' },
@@ -1291,86 +1300,99 @@ function ExportarPersonalizadoModal({ items, onClose, initialMes }) {
         { key: 'aPagar', label: 'A Pagar' },
         { key: 'aReceber', label: 'A Receber' },
     ];
+    const getFiltrados = () => {
+        const [anoSel, mesSel] = mesFiltro.split('-').map(Number);
+        const primeiroDia = `${mesFiltro}-01`;
+        const ultimoDiaNum = new Date(anoSel, mesSel, 0).getDate();
+        const ultimoDia = `${mesFiltro}-${String(ultimoDiaNum).padStart(2, '0')}`;
+        const porData = (a, b) => new Date(a.vencimento) - new Date(b.vencimento);
+        const fixas = items.filter((i) => i.categoria === 'Fixa' && (todosOsMeses || i.competencia === mesFiltro)).sort(porData);
+        const variaveis = items.filter((i) => i.categoria === 'Variável' && (todosOsMeses || (i.vencimento && i.vencimento >= primeiroDia && i.vencimento <= ultimoDia))).sort(porData);
+        const pagar = items.filter((i) => i.tipo === 'Pagar').sort(porData);
+        const receber = items.filter((i) => i.tipo === 'Receber').sort(porData);
+        return { fixas, variaveis, pagar, receber };
+    };
+    const rotuloMes = todosOsMeses ? 'Todos os meses' : `Período: ${mesFiltro}`;
+    const handleExportExcel = async (filtrados) => {
+        const optsFixasVar = { widths: { 'Descrição': 28, 'Tipo': 12, 'Valor (R$)': 14, 'Vencimento': 14, 'Status': 12 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] };
+        const optsContas = { widths: { 'Vencimento': 14, 'Descrição': 34, 'Valor (R$)': 14, 'Status': 12, 'Observação': 26 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] };
+        const sufixo = todosOsMeses ? '(todos os meses)' : `(${mesFiltro})`;
+        const wb = XLSX.utils.book_new();
+        const mapContaFV = (i) => ({
+            'Descrição': i.descricao,
+            'Tipo': i.tipo,
+            'Valor (R$)': Number(i.valor) || 0,
+            'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+            'Status': i.status,
+        });
+        const mapConta = (i) => ({
+            'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
+            'Descrição': i.descricao,
+            'Valor (R$)': Number(i.valor) || 0,
+            'Status': i.status,
+            'Observação': i.obs || '',
+        });
+        if (selecionados.fixas)
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(filtrados.fixas.map(mapContaFV), optsFixasVar), `Fixas ${sufixo}`.slice(0, 31));
+        if (selecionados.variaveis)
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(filtrados.variaveis.map(mapContaFV), optsFixasVar), `Variáveis ${sufixo}`.slice(0, 31));
+        if (selecionados.aPagar)
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(filtrados.pagar.map(mapConta), optsContas), 'A Pagar');
+        if (selecionados.aReceber)
+            XLSX.utils.book_append_sheet(wb, buildStyledSheet(filtrados.receber.map(mapConta), optsContas), 'A Receber');
+        XLSX.writeFile(wb, 'distrisol-relatorio-personalizado.xlsx');
+        await registrarUltimoBackup();
+        onClose();
+    };
     const handleExport = async () => {
         if (!Object.values(selecionados).some(Boolean)) {
             alert('Selecione ao menos um item para exportar.');
             return;
         }
+        if (formato === 'pdf') {
+            setMostrarPreview(true);
+            return;
+        }
         setExportando(true);
         try {
-            const wb = XLSX.utils.book_new();
-            const optsFixasVar = { widths: { 'Descrição': 28, 'Tipo': 12, 'Valor (R$)': 14, 'Vencimento': 14, 'Status': 12 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] };
-            const optsContas = { widths: { 'Vencimento': 14, 'Descrição': 34, 'Valor (R$)': 14, 'Status': 12, 'Observação': 26 }, currencyCols: ['Valor (R$)'], dateCols: ['Vencimento'] };
-            const [anoSel, mesSel] = mesFiltro.split('-').map(Number);
-            const primeiroDia = `${mesFiltro}-01`;
-            const ultimoDiaNum = new Date(anoSel, mesSel, 0).getDate();
-            const ultimoDia = `${mesFiltro}-${String(ultimoDiaNum).padStart(2, '0')}`;
-            const rotuloMes = todosOsMeses ? '(todos os meses)' : `(${mesFiltro})`;
-            if (selecionados.fixas) {
-                const rowsFixas = items
-                    .filter((i) => i.categoria === 'Fixa' && (todosOsMeses || i.competencia === mesFiltro))
-                    .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
-                    .map((i) => ({
-                    'Descrição': i.descricao,
-                    'Tipo': i.tipo,
-                    'Valor (R$)': Number(i.valor) || 0,
-                    'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
-                    'Status': i.status,
-                }));
-                XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsFixas, optsFixasVar), `Fixas ${rotuloMes}`.slice(0, 31));
-            }
-            if (selecionados.variaveis) {
-                const rowsVariaveis = items
-                    .filter((i) => i.categoria === 'Variável' && (todosOsMeses || (i.vencimento && i.vencimento >= primeiroDia && i.vencimento <= ultimoDia)))
-                    .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
-                    .map((i) => ({
-                    'Descrição': i.descricao,
-                    'Tipo': i.tipo,
-                    'Valor (R$)': Number(i.valor) || 0,
-                    'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
-                    'Status': i.status,
-                }));
-                XLSX.utils.book_append_sheet(wb, buildStyledSheet(rowsVariaveis, optsFixasVar), `Variáveis ${rotuloMes}`.slice(0, 31));
-            }
-            const buildRowsContas = (list) => [...list]
-                .sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento))
-                .map((i) => ({
-                    'Vencimento': i.vencimento ? new Date(i.vencimento + 'T00:00:00') : '',
-                    'Descrição': i.descricao,
-                    'Valor (R$)': Number(i.valor) || 0,
-                    'Status': i.status,
-                    'Observação': i.obs || '',
-                }));
-            if (selecionados.aPagar) {
-                XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRowsContas(items.filter((i) => i.tipo === 'Pagar')), optsContas), 'A Pagar');
-            }
-            if (selecionados.aReceber) {
-                XLSX.utils.book_append_sheet(wb, buildStyledSheet(buildRowsContas(items.filter((i) => i.tipo === 'Receber')), optsContas), 'A Receber');
-            }
-            XLSX.writeFile(wb, 'distrisol-relatorio-personalizado.xlsx');
-            await registrarUltimoBackup();
-            onClose();
+            await handleExportExcel(getFiltrados());
         }
         finally {
             setExportando(false);
         }
     };
-    return (React.createElement("div", { className: "fixed inset-0 z-50 flex items-center justify-center", style: { background: 'rgba(20,33,61,0.45)', zIndex: 100, padding: '16px' }, onClick: onClose },
-        React.createElement("div", { className: "w-full md:max-w-sm rounded-2xl", style: { background: 'var(--paper)', padding: '20px' }, onClick: (e) => e.stopPropagation() },
-            React.createElement("div", { className: "flex items-center justify-between mb-4" },
-                React.createElement("h3", { className: "font-semibold text-lg", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, "Exportar \u2014 escolher"),
-                React.createElement("button", { onClick: onClose, className: "p-1 rounded-full" },
-                    React.createElement(X, { size: 20, color: "var(--navy)" }))),
-            React.createElement("div", { className: "space-y-2 mb-4" }, opcoes.map((op) => (React.createElement("label", { key: op.key, className: "flex items-center gap-2 text-sm rounded-lg p-2.5", style: { background: 'white', border: '1px solid var(--line)', color: 'var(--text)' } },
-                React.createElement("input", { type: "checkbox", checked: selecionados[op.key], onChange: () => toggle(op.key), style: { width: '18px', height: '18px', accentColor: 'var(--navy)' } }),
-                op.label)))),
-            React.createElement("p", { className: "text-xs font-medium mb-2", style: { color: 'var(--text-muted)' } }, "Per\u00EDodo (vale pra Fixas e Vari\u00E1veis)"),
-            React.createElement("div", { className: "flex items-center gap-2 mb-4" },
-                React.createElement("input", { type: "month", value: mesFiltro, disabled: todosOsMeses, onChange: (e) => setMesFiltro(e.target.value), className: "flex-1 rounded-lg px-3 py-2 text-sm border", style: { borderColor: 'var(--line)', background: todosOsMeses ? 'var(--paper-alt)' : 'white', color: 'var(--text)' } })),
-            React.createElement("label", { className: "flex items-center gap-2 text-sm mb-4", style: { color: 'var(--text-muted)' } },
-                React.createElement("input", { type: "checkbox", checked: todosOsMeses, onChange: () => setTodosOsMeses((v) => !v), style: { width: '16px', height: '16px', accentColor: 'var(--navy)' } }),
-                "Todos os meses (ignorar per\u00EDodo)"),
-            React.createElement("button", { onClick: handleExport, disabled: exportando, className: "w-full rounded-lg py-2.5 font-medium text-sm", style: { background: 'var(--navy)', color: 'var(--teal-soft)', opacity: exportando ? 0.6 : 1 } }, exportando ? 'Exportando...' : 'Exportar selecionados'))));
+    const linhasPdf = (i) => [i.descricao, i.tipo, formatBRL(i.valor), formatDate(i.vencimento), i.status];
+    const listaOpcoes = opcoes.map((op) => React.createElement("label", { key: op.key, className: "flex items-center gap-2 text-sm rounded-lg p-2.5", style: { background: 'white', border: '1px solid var(--line)', color: 'var(--text)' } },
+        React.createElement("input", { type: "checkbox", checked: selecionados[op.key], onChange: () => toggle(op.key), style: { width: '18px', height: '18px', accentColor: 'var(--navy)' } }),
+        op.label));
+    const botaoFormato = (valor, rotulo) => React.createElement("button", { key: valor, onClick: () => setFormato(valor), className: "flex-1 text-sm font-medium py-2 rounded-lg", style: { background: formato === valor ? 'var(--navy)' : 'var(--paper-alt)', color: formato === valor ? 'var(--teal-soft)' : 'var(--text-muted)' } }, rotulo);
+    const painel = React.createElement("div", { className: "w-full md:max-w-sm rounded-2xl", style: { background: 'var(--paper)', padding: '20px' }, onClick: (e) => e.stopPropagation() },
+        React.createElement("div", { className: "flex items-center justify-between mb-4" },
+            React.createElement("h3", { className: "font-semibold text-lg", style: { fontFamily: 'var(--font-display)', color: 'var(--navy)' } }, "Exportar \u2014 escolher"),
+            React.createElement("button", { onClick: onClose, className: "p-1 rounded-full" }, React.createElement(X, { size: 20, color: "var(--navy)" }))),
+        React.createElement("div", { className: "space-y-2 mb-4" }, listaOpcoes),
+        React.createElement("p", { className: "text-xs font-medium mb-2", style: { color: 'var(--text-muted)' } }, "Per\u00EDodo (vale pra Fixas e Vari\u00E1veis)"),
+        React.createElement("div", { className: "flex items-center gap-2 mb-4" },
+            React.createElement("input", { type: "month", value: mesFiltro, disabled: todosOsMeses, onChange: (e) => setMesFiltro(e.target.value), className: "flex-1 rounded-lg px-3 py-2 text-sm border", style: { borderColor: 'var(--line)', background: todosOsMeses ? 'var(--paper-alt)' : 'white', color: 'var(--text)' } })),
+        React.createElement("label", { className: "flex items-center gap-2 text-sm mb-4", style: { color: 'var(--text-muted)' } },
+            React.createElement("input", { type: "checkbox", checked: todosOsMeses, onChange: () => setTodosOsMeses((v) => !v), style: { width: '16px', height: '16px', accentColor: 'var(--navy)' } }),
+            "Todos os meses (ignorar per\u00EDodo)"),
+        React.createElement("p", { className: "text-xs font-medium mb-2", style: { color: 'var(--text-muted)' } }, "Formato"),
+        React.createElement("div", { className: "flex gap-2 mb-4" }, botaoFormato('excel', 'Excel'), botaoFormato('pdf', 'PDF')),
+        React.createElement("button", { onClick: handleExport, disabled: exportando, className: "w-full rounded-lg py-2.5 font-medium text-sm", style: { background: 'var(--navy)', color: 'var(--teal-soft)', opacity: exportando ? 0.6 : 1 } }, exportando ? 'Exportando...' : (formato === 'pdf' ? 'Ver relat\u00F3rio (PDF)' : 'Exportar selecionados (Excel)')));
+    const overlay = React.createElement("div", { className: "fixed inset-0 z-50 flex items-center justify-center", style: { background: 'rgba(20,33,61,0.45)', zIndex: 100, padding: '16px' }, onClick: onClose }, painel);
+    let preview = null;
+    if (mostrarPreview) {
+        const f = getFiltrados();
+        const secoes = [
+            selecionados.fixas && { heading: 'Fixas', rows: f.fixas.map(linhasPdf), empty: 'Nenhum registro.' },
+            selecionados.variaveis && { heading: 'Variáveis', rows: f.variaveis.map(linhasPdf), empty: 'Nenhum registro.' },
+            selecionados.aPagar && { heading: 'A Pagar', rows: f.pagar.map(linhasPdf), empty: 'Nenhum registro.' },
+            selecionados.aReceber && { heading: 'A Receber', rows: f.receber.map(linhasPdf), empty: 'Nenhum registro.' },
+        ].filter(Boolean);
+        preview = React.createElement(ReportPreviewModal, { onClose: () => setMostrarPreview(false), title: "Relat\u00F3rio Financeiro \u2014 Distrisol", subtitle: rotuloMes, sections: secoes });
+    }
+    return React.createElement(React.Fragment, null, overlay, preview);
 }
 const NOMES_MES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 function CalendarioFinanceiro({ items, onExportMonth, onTogglePago }) {
@@ -1476,17 +1498,6 @@ function FinanceiroTab({ collection }) {
     const [mostrarRelatorioFin, setMostrarRelatorioFin] = useState(false);
     const [exportarPersonalizadoOpen, setExportarPersonalizadoOpen] = useState(false);
     const [exportarMesInicial, setExportarMesInicial] = useState(null);
-    useEffect(() => {
-        if (!mostrarRelatorioFin)
-            return;
-        const handler = () => setMostrarRelatorioFin(false);
-        window.addEventListener('afterprint', handler);
-        const t = setTimeout(() => window.print(), 50);
-        return () => {
-            clearTimeout(t);
-            window.removeEventListener('afterprint', handler);
-        };
-    }, [mostrarRelatorioFin]);
     const templates = useCollection('distrisol:financeiro-templates');
     useEffect(() => {
         // One-time cleanup: templates used to support a 'Variável' category
@@ -1867,7 +1878,7 @@ function FinanceiroTab({ collection }) {
             modalOpen && (React.createElement(RecordModal, { title: editing ? 'Editar conta' : 'Nova conta', fields: FINANCEIRO_FIELDS, initial: editing, onClose: () => { setModalOpen(false); setEditing(null); }, onSave: handleSave })),
             importModalOpen && (React.createElement(ImportFinanceiroModal, { collection: collection, onClose: () => setImportModalOpen(false) })),
             exportarPersonalizadoOpen && React.createElement(ExportarPersonalizadoModal, { items: items, initialMes: exportarMesInicial, onClose: () => { setExportarPersonalizadoOpen(false); setExportarMesInicial(null); } }),
-            mostrarRelatorioFin && React.createElement(PrintableReport, { title: "Relat\u00F3rio Financeiro \u2014 Distrisol", subtitle: `Gerado em ${formatDate(new Date().toISOString().slice(0, 10))}`, sections: [
+            mostrarRelatorioFin && React.createElement(ReportPreviewModal, { onClose: () => setMostrarRelatorioFin(false), title: "Relat\u00F3rio Financeiro \u2014 Distrisol", subtitle: `Gerado em ${formatDate(new Date().toISOString().slice(0, 10))}`, sections: [
                     { heading: 'Resumo', rows: [
                             ['Saldo previsto', formatBRL(totalReceberPendente - totalPagarPendente)],
                             ['A pagar (pendente)', formatBRL(totalPagarPendente)],
@@ -2572,17 +2583,6 @@ function DashboardTab({ estoque, financeiro, licitacoes, cotacoes, acordos, mark
         return `Atualizado há ${dias} dias`;
     };
     useEffect(() => {
-        if (!mostrarRelatorio)
-            return;
-        const handler = () => setMostrarRelatorio(false);
-        window.addEventListener('afterprint', handler);
-        const t = setTimeout(() => window.print(), 50);
-        return () => {
-            clearTimeout(t);
-            window.removeEventListener('afterprint', handler);
-        };
-    }, [mostrarRelatorio]);
-    useEffect(() => {
         let mounted = true;
         (async () => {
             try {
@@ -2828,7 +2828,7 @@ function DashboardTab({ estoque, financeiro, licitacoes, cotacoes, acordos, mark
                             formatDate(item.vencimento))),
                     React.createElement("span", { className: "text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ml-2", style: { background: tone.bg, color: tone.color } }, mostrarValor(item.valor))));
             }))),
-            mostrarRelatorio && React.createElement(PrintableReport, { title: "Relat\u00F3rio Geral \u2014 Distrisol", subtitle: `Gerado em ${formatDate(new Date().toISOString().slice(0, 10))}`, sections: [
+            mostrarRelatorio && React.createElement(ReportPreviewModal, { onClose: () => setMostrarRelatorio(false), title: "Relat\u00F3rio Geral \u2014 Distrisol", subtitle: `Gerado em ${formatDate(new Date().toISOString().slice(0, 10))}`, sections: [
                     { heading: 'Estoque com nível baixo', rows: estoqueBaixo.map((i) => [i.nome, `${i.quantidade} ${i.unidade || 'un'}`, `mínimo: ${i.estoqueMinimo || 0}`]), empty: 'Nenhum item com estoque baixo.' },
                     { heading: 'Vendas por modalidade', rows: modalidades.map((m) => [m.label, `${m.items.length} registro(s)`]) },
                     { heading: 'Documentos vencendo em 30 dias', rows: documentos.items.filter((d) => d.vencimento && diasParaVencer(d.vencimento) <= 30).map((d) => [d.nome, formatDate(d.vencimento)]), empty: 'Nenhum documento vencendo em breve.' },
